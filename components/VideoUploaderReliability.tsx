@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import ReliabilityResults from './ReliabilityResults'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -67,12 +67,56 @@ export default function VideoUploaderReliability({
     const x = (e.clientX - rect.left) / rect.width
     const y = (e.clientY - rect.top) / rect.height
     
-    setRoiPoints([...roiPoints, { x, y }])
-  }, [roiPoints])
+    setRoiPoints(prev => [...prev, { x, y }])
+  }, [])
 
   const handleClearRoi = () => {
     setRoiPoints([])
   }
+
+  // Redraw canvas when roiPoints change
+  useEffect(() => {
+    if (!showRoiDraw || !canvasRef.current || !actualVideoRef.current) return
+    
+    const canvas = canvasRef.current
+    const video = actualVideoRef.current
+    
+    const draw = () => {
+      const rect = video.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) return
+      
+      canvas.width = rect.width
+      canvas.height = rect.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      roiPoints.forEach((point, idx) => {
+        const x = point.x * canvas.width
+        const y = point.y * canvas.height
+        ctx.fillStyle = '#4ade80'
+        ctx.beginPath()
+        ctx.arc(x, y, 8, 0, 2 * Math.PI)
+        ctx.fill()
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 12px sans-serif'
+        ctx.fillText(`P${idx + 1}`, x + 12, y + 4)
+      })
+      if (roiPoints.length === 4) {
+        // Draw ROI rectangle
+        const xs = roiPoints.map(p => p.x * canvas.width).sort((a, b) => a - b)
+        const ys = roiPoints.map(p => p.y * canvas.height).sort((a, b) => a - b)
+        ctx.strokeStyle = '#ef4444'
+        ctx.lineWidth = 2
+        ctx.strokeRect(xs[0], ys[0], xs[3] - xs[0], ys[3] - ys[0])
+      }
+    }
+    
+    draw()
+    const handleResize = () => draw()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [roiPoints, showRoiDraw])
 
   const handleUpload = async () => {
     if (!selectedFile) {
@@ -114,9 +158,12 @@ export default function VideoUploaderReliability({
       // Always use Next.js API route (mock processing) - works without backend
       // Backend is optional and only used if explicitly configured AND available
       const endpoint = '/api/analyze-reliability'
-      console.log(`[Frontend] Using Next.js API route: ${endpoint}`)
       
-      console.log(`[Frontend] Calling ${endpoint} with file: ${selectedFile.name} (${selectedFile.size} bytes) at`, new Date().toISOString())
+      // Only log in development
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[Frontend] Using Next.js API route: ${endpoint}`)
+        console.log(`[Frontend] Calling ${endpoint} with file: ${selectedFile.name} (${selectedFile.size} bytes) at`, new Date().toISOString())
+      }
       
       // Add timeout (65 seconds for Vercel)
       const timeout = 65000
@@ -130,7 +177,9 @@ export default function VideoUploaderReliability({
           body: formData,
           signal: controller.signal,
         })
-        console.log(`[Frontend] Response received in ${Date.now() - requestStart}ms, status: ${response.status}`)
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`[Frontend] Response received in ${Date.now() - requestStart}ms, status: ${response.status}`)
+        }
       } catch (fetchError) {
         console.error('[Frontend] Fetch error:', fetchError)
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
@@ -271,49 +320,18 @@ export default function VideoUploaderReliability({
             <div className="relative">
               {showRoiDraw ? (
                 <div className="relative">
-                  <img
-                    ref={imageRef}
+                  <video
+                    ref={actualVideoRef}
                     src={previewUrl}
-                    alt="Video preview for ROI drawing"
                     className="w-full rounded-lg"
-                    style={{ maxHeight: '400px', objectFit: 'contain' }}
-                    onLoad={() => {
-                      // Draw ROI points on canvas overlay
-                      const canvas = canvasRef.current
-                      const img = imageRef.current
-                      if (canvas && img) {
-                        canvas.width = img.offsetWidth
-                        canvas.height = img.offsetHeight
-                        const ctx = canvas.getContext('2d')
-                        if (ctx) {
-                          ctx.clearRect(0, 0, canvas.width, canvas.height)
-                          roiPoints.forEach((point, idx) => {
-                            const x = point.x * canvas.width
-                            const y = point.y * canvas.height
-                            ctx.fillStyle = '#4ade80'
-                            ctx.beginPath()
-                            ctx.arc(x, y, 8, 0, 2 * Math.PI)
-                            ctx.fill()
-                            ctx.fillStyle = '#fff'
-                            ctx.font = 'bold 12px sans-serif'
-                            ctx.fillText(`P${idx + 1}`, x + 12, y + 4)
-                          })
-                          if (roiPoints.length === 4) {
-                            // Draw ROI rectangle
-                            const xs = roiPoints.map(p => p.x * canvas.width).sort((a, b) => a - b)
-                            const ys = roiPoints.map(p => p.y * canvas.height).sort((a, b) => a - b)
-                            ctx.strokeStyle = '#ef4444'
-                            ctx.lineWidth = 2
-                            ctx.strokeRect(xs[0], ys[0], xs[3] - xs[0], ys[3] - ys[0])
-                          }
-                        }
-                      }
-                    }}
+                    style={{ maxHeight: '400px' }}
+                    controls={false}
+                    muted
                   />
                   <canvas
                     ref={canvasRef}
                     onClick={handleCanvasClick}
-                    className="absolute top-0 left-0 w-full h-full cursor-crosshair rounded-lg"
+                    className="absolute top-0 left-0 w-full h-full cursor-crosshair rounded-lg pointer-events-auto"
                     style={{ maxHeight: '400px' }}
                   />
                   <button

@@ -1,54 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { ReliabilityResponse, GrokRequestBody } from '@/lib/types'
+import { logger } from '@/lib/logger'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60 // 60 seconds (Vercel Pro limit)
-
-// Types
-interface ReliabilityResponse {
-  reliability_label: 'RELIABLE' | 'NOT RELIABLE'
-  reliability_score: number
-  why: string
-  action: string
-  grok_insights?: string // Optional AI-powered insights from Grok
-  signals: {
-    occlusion_pct_avg: number
-    occlusion_pct_max: number
-    dwell_s_max: number
-    blur_score_avg: number
-    redundancy: number
-  }
-  timestamps: {
-    flip_at_s: number
-    standard_ai_alert_at_s: number
-    standard_not_triggered?: boolean
-  }
-  debug: {
-    sampled_frames: number
-    fps_used: number
-    roi: [number, number, number, number]
-  }
-  overlay_image?: string // base64 PNG with ROI + boxes drawn
-  overlay_image_base64?: string // Alternative field name for overlay image
-  alert_frame?: string // base64 PNG of frame at flip_at_s
-  frame_data?: {
-    // Frame at flip_at_s for thumbnail
-    timestamp: number
-    person_boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>
-  }
-  all_frames?: Array<{
-    // All frames with person boxes for overlay
-    timestamp: number
-    person_boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>
-    occlusion_pct: number
-  }>
-}
 
 // Default ROI (center-lower area) - [x1, y1, x2, y2] as percentage
 const DEFAULT_ROI: [number, number, number, number] = [0.25, 0.6, 0.75, 0.95]
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
-  console.log('[Reliability API] Request started at', new Date().toISOString())
+  logger.log('[Reliability API] Request started at', new Date().toISOString())
   
   try {
     // Check for RTSP URL in query params (for live stream simulation)
@@ -60,7 +22,7 @@ export async function POST(request: NextRequest) {
     
     if (backendUrl) {
       // Proxy to FastAPI backend for real YOLO analysis
-      console.log(`[Reliability API] Proxying to backend: ${backendUrl}`)
+      logger.log(`[Reliability API] Proxying to backend: ${backendUrl}`)
       
       try {
         const formData = await request.formData()
@@ -79,6 +41,7 @@ export async function POST(request: NextRequest) {
         
         const fpsParam = formData.get('fps')
         const roiParam = formData.get('roi')
+        const roiSource = roiParam ? 'USER' : 'AUTO' // Track ROI source
         if (fpsParam) {
           backendFormData.append('fps', fpsParam as string)
         }
@@ -94,7 +57,7 @@ export async function POST(request: NextRequest) {
         
         if (!backendResponse.ok) {
           const errorData = await backendResponse.text()
-          console.error('[Reliability API] Backend error:', errorData)
+          logger.error('[Reliability API] Backend error:', errorData)
           return NextResponse.json(
             { error: `Backend analysis failed: ${errorData}` },
             { status: backendResponse.status }
@@ -103,37 +66,57 @@ export async function POST(request: NextRequest) {
         
         const data = await backendResponse.json()
         const elapsed = Date.now() - startTime
-        console.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
-        console.log('[Reliability API] Backend response keys:', Object.keys(data))
-        console.log('[Reliability API] Has overlay_image:', !!data.overlay_image)
-        console.log('[Reliability API] Has alert_frame:', !!data.alert_frame)
+        logger.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
+        logger.log('[Reliability API] Backend response keys:', Object.keys(data))
+        logger.log('[Reliability API] Has overlay_image:', !!data.overlay_image)
+        logger.log('[Reliability API] Has alert_frame:', !!data.alert_frame)
+        
+        // Track ROI source (USER if ROI was provided, AUTO otherwise)
+        if (!data.debug) {
+          data.debug = {}
+        }
+        if (!data.debug.roi_source) {
+          data.debug.roi_source = roiSource
+        }
         
         // Enhance with Grok AI insights if available
         const grokApiKey = process.env.GROK_API_KEY
         if (grokApiKey) {
           try {
-            console.log('[Reliability API] Attempting Grok AI enhancement with backend data...')
+            logger.log('[Reliability API] Attempting Grok AI enhancement with backend data...')
             
             // Use alert_frame if available (most relevant), otherwise overlay_image, otherwise metrics-only
             const frameToAnalyze = data.alert_frame || data.overlay_image
             const hasFrame = !!frameToAnalyze
             
             const grokPrompt = hasFrame
-              ? `Analyze this CCTV frame showing a critical zone (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+              ? data.reliability_label === 'RELIABLE'
+                ? `Analyze this CCTV frame showing a critical zone (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
 
-First, explain in one sentence why this zone is unreliable (${data.reliability_label.toLowerCase()}).
+This zone is RELIABLE. Explain in one sentence why the coverage is adequate and trustworthy based on what you see in the frame.
+
+Then provide maintenance recommendations. Examples: "Continue monitoring with current setup" or "Consider periodic calibration checks" or "Maintain current camera positioning".`
+                : `Analyze this CCTV frame showing a critical zone (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+
+This zone is NOT RELIABLE. First, explain in one sentence why this zone is unreliable.
 
 Then, analyze the frame visually: Where are the blind spots? Where are people being detected? What's the camera angle? Based on what you see, provide a SPECIFIC camera placement recommendation. Examples: "Add camera at top-left corner pointing down at 45° angle" or "Install overhead camera 3 meters above the ROI center" or "Position second camera opposite side of room at eye level". Be specific about location and angle.`
-              : `CCTV reliability audit: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+              : data.reliability_label === 'RELIABLE'
+                ? `CCTV reliability audit: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
 
-Explain in one sentence why this zone is unreliable (${data.reliability_label.toLowerCase()}).
+This zone is RELIABLE. Explain in one sentence why the coverage is adequate and trustworthy.
+
+Then provide maintenance recommendations. Examples: "Continue monitoring with current setup" or "Consider periodic calibration checks" or "Maintain current camera positioning".`
+                : `CCTV reliability audit: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+
+This zone is NOT RELIABLE. Explain in one sentence why this zone is unreliable.
 
 Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the ROI at 3m height" or "Install overhead camera above the critical zone" or "Position second camera at left edge pointing right". Be specific about location and angle.`
 
             const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
             const modelName = process.env.GROK_MODEL || 'grok-4'
             
-            const grokRequestBody: any = {
+            const grokRequestBody: GrokRequestBody = {
               model: modelName,
               messages: [
                 {
@@ -158,7 +141,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
               temperature: 0.7,
             }
             
-            console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}, hasFrame: ${hasFrame}`)
+            logger.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}, hasFrame: ${hasFrame}`)
             
             const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
               method: 'POST',
@@ -173,7 +156,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
               const grokData = await grokResponse.json()
               const grokInsights = grokData.choices?.[0]?.message?.content || null
               if (grokInsights) {
-                console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
+                logger.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
                 data.grok_insights = grokInsights
                 // Parse Grok response - extract why (first sentence) and action (camera recommendation)
                 // Split by common separators
@@ -184,8 +167,11 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
                   data.why = parts[0].trim().replace(/^["']|["']$/g, '') + (parts[0].trim().match(/[.!?]$/) ? '' : '.')
                 }
                 
-                // Look for action/recommendation - usually contains camera placement keywords
-                const actionKeywords = /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge)/i
+                // For NOT RELIABLE: Look for camera placement keywords
+                // For RELIABLE: Look for maintenance keywords
+                const actionKeywords = data.reliability_label === 'RELIABLE'
+                  ? /(?:continue|monitor|maintain|calibration|periodic|setup|current)/i
+                  : /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge)/i
                 let actionFound = false
                 
                 for (let i = 1; i < parts.length; i++) {
@@ -204,18 +190,18 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
                   }
                 }
               } else {
-                console.warn('[Reliability API] Grok response had no content')
+                logger.warn('[Reliability API] Grok response had no content')
               }
             } else {
               const errorText = await grokResponse.text()
-              console.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
+              logger.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
             }
           } catch (grokError) {
-            console.error('[Reliability API] Grok enhancement failed:', grokError)
+            logger.error('[Reliability API] Grok enhancement failed:', grokError)
             // Continue without Grok enhancement
           }
         } else {
-          console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
+          logger.log('[Reliability API] Grok API key not found, skipping AI enhancement')
         }
         
         // Add overlay_image_base64 if available
@@ -223,15 +209,20 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
           data.overlay_image_base64 = data.overlay_image
         }
         
+        // Add roi_source if not present (for backend responses)
+        if (!data.debug.roi_source) {
+          data.debug.roi_source = 'AUTO' // Default to AUTO if not specified
+        }
+        
         return NextResponse.json(data)
       } catch (proxyError) {
-        console.warn('[Reliability API] Backend connection failed, falling back to mock processing:', proxyError)
+        logger.warn('[Reliability API] Backend connection failed, falling back to mock processing:', proxyError)
         // Fall through to mock processing instead of erroring
       }
     }
     
     // Fallback to mock processing (backend not configured or connection failed)
-    console.log('[Reliability API] Using mock processing (backend not available)')
+    logger.log('[Reliability API] Using mock processing (backend not available)')
     
     // For mock processing, we don't need the actual file content
     // Just get metadata to avoid Vercel's file buffering delay
@@ -241,40 +232,42 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
     let formData: FormData | null = null
     let videoFile: File | null = null
     let fileSize = 0
-    let fps = 5
-    let roi: [number, number, number, number] = DEFAULT_ROI
-    
-    try {
-      const formDataPromise = request.formData()
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('FormData timeout')), 2000)
-      )
-      formData = await Promise.race([formDataPromise, timeoutPromise])
-      videoFile = formData.get('video') as File
+      let fps = 5
+      let roi: [number, number, number, number] = DEFAULT_ROI
+      let roiSource: 'AUTO' | 'USER' = 'AUTO'
       
-      if (videoFile) {
-        fileSize = videoFile.size
-        console.log('[Reliability API] Got file metadata:', videoFile.name, fileSize, 'bytes')
-      }
-      
-      // Get parameters
-      const fpsParam = formData.get('fps')
-      const roiParam = formData.get('roi')
-      fps = fpsParam ? Number(fpsParam) : 5
-      
-      if (roiParam) {
-        try {
-          const parsed = JSON.parse(roiParam as string)
-          if (Array.isArray(parsed) && parsed.length === 4) {
-            roi = parsed as [number, number, number, number]
-          }
-        } catch (e) {
-          console.warn('[Reliability API] Invalid ROI format, using default')
+      try {
+        const formDataPromise = request.formData()
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('FormData timeout')), 2000)
+        )
+        formData = await Promise.race([formDataPromise, timeoutPromise])
+        videoFile = formData.get('video') as File
+        
+        if (videoFile) {
+          fileSize = videoFile.size
+          logger.log('[Reliability API] Got file metadata:', videoFile.name, fileSize, 'bytes')
         }
-      }
+        
+        // Get parameters
+        const fpsParam = formData.get('fps')
+        const roiParam = formData.get('roi')
+        fps = fpsParam ? Number(fpsParam) : 5
+        
+        if (roiParam) {
+          try {
+            const parsed = JSON.parse(roiParam as string)
+            if (Array.isArray(parsed) && parsed.length === 4) {
+              roi = parsed as [number, number, number, number]
+              roiSource = 'USER' // User-drawn ROI
+            }
+          } catch (e) {
+            logger.warn('[Reliability API] Invalid ROI format, using default')
+          }
+        }
     } catch (formError) {
       // If formData parsing fails/times out, use default values for mock processing
-      console.warn('[Reliability API] FormData parsing issue, using defaults:', formError)
+      logger.warn('[Reliability API] FormData parsing issue, using defaults:', formError)
       fileSize = 10 * 1024 * 1024 // Default 10MB for mock
     }
     
@@ -297,8 +290,8 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
     // This avoids memory issues on Vercel
     // For Vercel Hobby (10s timeout), we need to return quickly
 
-    console.log(`[Reliability API] Parameters - fps: ${fps}, roi: ${roi}, fileSize: ${fileSize}`)
-    console.log('[Reliability API] Starting mock processing (no file I/O)...')
+    logger.log(`[Reliability API] Parameters - fps: ${fps}, roi: ${roi}, fileSize: ${fileSize}`)
+    logger.log('[Reliability API] Starting mock processing (no file I/O)...')
 
     // TODO: For full implementation, use:
     // - ffmpeg-python or fluent-ffmpeg to extract frames
@@ -319,7 +312,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
       const videoDuration = estimatedDuration
       const sampledFrames = Math.ceil(videoDuration * fps)
       
-      console.log(`[Reliability API] Estimated duration: ${videoDuration}s, frames: ${sampledFrames}`)
+      logger.log(`[Reliability API] Estimated duration: ${videoDuration}s, frames: ${sampledFrames}`)
       
       // Mock person detection results per frame
       // Store frames with person boxes for overlay rendering
@@ -519,7 +512,14 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
 
       // Calculate reliability score
       // risk = 0.6*(occlusion_pct_max/100) + 0.3*min(dwell_s_max/5,1) + 0.1*blur_term
-      const blurTerm = Math.max(0, 1 - (blurScoreAvg / 3000)) // Normalize blur (lower = blurrier)
+      // Normalize blur score: handle 0 case and normalize to [0,1]
+      // Typical range: 0-5000, but 0 means very blurry, so we need to handle it
+      const blurMax = 3000 // Maximum expected blur score
+      const blurNormalized = blurScoreAvg > 0 
+        ? Math.min(1, blurScoreAvg / blurMax) 
+        : 0 // If 0, treat as maximum blur
+      const blurTerm = 1 - blurNormalized // Invert: higher score = less blur
+      
       const risk = 0.6 * (occlusionPctMax / 100) + 
                    0.3 * Math.min(dwellSMax / 5, 1) + 
                    0.1 * blurTerm
@@ -544,19 +544,25 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
       const grokApiKey = process.env.GROK_API_KEY
       if (grokApiKey) {
         try {
-          console.log('[Reliability API] Attempting Grok AI enhancement...')
+          logger.log('[Reliability API] Attempting Grok AI enhancement...')
           // Use metrics-based analysis for mock mode
           // (Backend mode uses actual frames - see backend response handling above)
-          const grokPrompt = `CCTV reliability audit: Occlusion avg ${Math.round(occlusionPctAvg)}%, max ${Math.round(occlusionPctMax)}%, dwell max ${dwellSMax.toFixed(1)}s, blur avg ${Math.round(blurScoreAvg)}, reliability ${reliabilityScore}/100.
+          const grokPrompt = reliabilityLabel === 'RELIABLE'
+            ? `CCTV reliability audit: Occlusion avg ${Math.round(occlusionPctAvg)}%, max ${Math.round(occlusionPctMax)}%, dwell max ${dwellSMax.toFixed(1)}s, blur avg ${Math.round(blurScoreAvg)}, reliability ${reliabilityScore}/100.
 
-Explain in one sentence why this zone is unreliable (${reliabilityLabel.toLowerCase()}).
+This zone is RELIABLE. Explain in one sentence why the coverage is adequate and trustworthy.
+
+Then provide maintenance recommendations. Examples: "Continue monitoring with current setup" or "Consider periodic calibration checks" or "Maintain current camera positioning".`
+            : `CCTV reliability audit: Occlusion avg ${Math.round(occlusionPctAvg)}%, max ${Math.round(occlusionPctMax)}%, dwell max ${dwellSMax.toFixed(1)}s, blur avg ${Math.round(blurScoreAvg)}, reliability ${reliabilityScore}/100.
+
+This zone is NOT RELIABLE. Explain in one sentence why this zone is unreliable.
 
 Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the ROI at 3m height" or "Install overhead camera above the critical zone" or "Position second camera at left edge pointing right". Be specific about location and angle.`
 
           const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
           const modelName = process.env.GROK_MODEL || 'grok-4'
           
-          console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}`)
+          logger.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}`)
           
           const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
             method: 'POST',
@@ -582,7 +588,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
             grokInsights = grokData.choices?.[0]?.message?.content || null
             
             if (grokInsights) {
-              console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
+              logger.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
               // Parse Grok response - extract why (first sentence) and action (camera recommendation)
               const parts = grokInsights.split(/\n+|\.\s+(?=[A-Z])/).filter(p => p.trim().length > 10)
               
@@ -611,31 +617,39 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
                 }
               }
             } else {
-              console.warn('[Reliability API] Grok response had no content')
+              logger.warn('[Reliability API] Grok response had no content')
             }
           } else {
             const errorText = await grokResponse.text()
-            console.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
+            logger.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
           }
         } catch (grokError) {
-          console.error('[Reliability API] Grok enhancement failed:', grokError)
+          logger.error('[Reliability API] Grok enhancement failed:', grokError)
         }
       } else {
-        console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
+        logger.log('[Reliability API] Grok API key not found, skipping AI enhancement')
       }
       
       // Fallback to templated response if Grok not available or failed
       if (!why) {
-        why = `Single view with ${occlusionText} means this zone can't be verified independently.`
+        if (reliabilityLabel === 'RELIABLE') {
+          why = `Coverage is adequate with ${occlusionText} and low dwell time, providing reliable monitoring.`
+        } else {
+          why = `Single view with ${occlusionText} means this zone can't be verified independently.`
+        }
       }
       if (!action) {
-        // More specific fallback based on occlusion level
-        if (occlusionPctMax > 60) {
-          action = 'Add second camera opposite the ROI to provide coverage overlap.'
-        } else if (occlusionPctMax > 30) {
-          action = 'Reposition camera or add overhead camera to reduce occlusion.'
+        if (reliabilityLabel === 'RELIABLE') {
+          action = 'Continue monitoring with current setup. Consider periodic calibration checks.'
         } else {
-          action = 'Consider adding camera redundancy for critical zone coverage.'
+          // More specific fallback based on occlusion level for NOT RELIABLE
+          if (occlusionPctMax > 60) {
+            action = 'Add second camera opposite the ROI to provide coverage overlap.'
+          } else if (occlusionPctMax > 30) {
+            action = 'Reposition camera or add overhead camera to reduce occlusion.'
+          } else {
+            action = 'Consider adding camera redundancy for critical zone coverage.'
+          }
         }
       }
 
@@ -677,6 +691,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
           sampled_frames: sampledFrames,
           fps_used: fps,
           roi,
+          roi_source: roiSource,
         },
         ...(overlayImage ? { overlay_image: overlayImage } : {}),
         ...(alertFrame ? { alert_frame: alertFrame } : {}),
@@ -693,21 +708,21 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
       }
 
       const elapsed = Date.now() - startTime
-      console.log(`[Reliability API] Processing completed in ${elapsed}ms`)
-      console.log(`[Reliability API] Response: ${JSON.stringify({ reliability_label: reliabilityLabel, reliability_score: reliabilityScore })}`)
+      logger.log(`[Reliability API] Processing completed in ${elapsed}ms`)
+      logger.log(`[Reliability API] Response: ${JSON.stringify({ reliability_label: reliabilityLabel, reliability_score: reliabilityScore })}`)
       
       // Ensure response is sent immediately
       const jsonResponse = NextResponse.json(response)
       jsonResponse.headers.set('Cache-Control', 'no-cache')
       return jsonResponse
     } catch (processingError) {
-      console.error('[Reliability API] Processing error:', processingError)
+      logger.error('[Reliability API] Processing error:', processingError)
       throw processingError
     }
   } catch (error) {
     const elapsed = Date.now() - startTime
-    console.error(`[Reliability API] Error after ${elapsed}ms:`, error)
-    console.error('[Reliability API] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
+    logger.error(`[Reliability API] Error after ${elapsed}ms:`, error)
+    logger.error('[Reliability API] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
     
     return NextResponse.json(
       {

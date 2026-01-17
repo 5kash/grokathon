@@ -7,15 +7,16 @@ import ReliabilityResults from '@/components/ReliabilityResults'
 import HomographyCalibration from '@/components/HomographyCalibration'
 import RotatingLinesBackground from '@/components/RotatingLinesBackground'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import type { ReliabilityResponse } from '@/lib/types'
 
 export default function UploadPage() {
-  const [reliabilityData, setReliabilityData] = useState<any>(null)
+  const [reliabilityData, setReliabilityData] = useState<ReliabilityResponse | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  const handleAnalysisComplete = (data: any) => {
+  const handleAnalysisComplete = (data: ReliabilityResponse) => {
     setReliabilityData(data)
     setIsAnalyzing(false)
     setError(null)
@@ -104,7 +105,9 @@ export default function UploadPage() {
               <div className="max-w-3xl mx-auto">
                 <HomographyCalibration
                   onCalibrationComplete={(matrix) => {
-                    console.log('Homography matrix:', matrix)
+                    if (process.env.NODE_ENV === 'development') {
+                      console.log('Homography matrix:', matrix)
+                    }
                     // Store homography matrix for later use in coverage polygon drawing
                   }}
                 />
