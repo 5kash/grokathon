@@ -75,29 +75,29 @@ export default function UploadPage() {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="analysis" className="space-y-6">
-              <div className="grid md:grid-cols-2 gap-8">
-                <div className="space-y-6">
-                  <VideoUploaderReliability
-                    onAnalysisStart={handleAnalysisStart}
-                    onAnalysisComplete={handleAnalysisComplete}
-                    onError={handleError}
-                    isAnalyzing={isAnalyzing}
-                    onVideoUrlChange={setVideoUrl}
-                    videoRef={videoRef}
-                  />
-                </div>
-
-                <div className="space-y-6">
-                  <ReliabilityResults
-                    data={reliabilityData}
-                    isAnalyzing={isAnalyzing}
-                    error={error}
-                    videoUrl={videoUrl || undefined}
-                    videoRef={videoRef}
-                  />
-                </div>
+            <TabsContent value="analysis" className="space-y-8">
+              {/* Top Section: Upload Controls */}
+              <div className="max-w-4xl mx-auto">
+                <VideoUploaderReliability
+                  onAnalysisStart={handleAnalysisStart}
+                  onAnalysisComplete={handleAnalysisComplete}
+                  onError={handleError}
+                  isAnalyzing={isAnalyzing}
+                  onVideoUrlChange={setVideoUrl}
+                  videoRef={videoRef}
+                />
               </div>
+
+              {/* Results Section: Better Grid Layout */}
+              {reliabilityData && (
+                <ReliabilityResults
+                  data={reliabilityData}
+                  isAnalyzing={isAnalyzing}
+                  error={error}
+                  videoUrl={videoUrl || undefined}
+                  videoRef={videoRef}
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="calibration" className="space-y-6">

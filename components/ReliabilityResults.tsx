@@ -28,6 +28,7 @@ interface ReliabilityData {
     sampled_frames: number
     fps_used: number
     roi: [number, number, number, number]
+    roi_source?: 'AUTO' | 'USER' // Whether ROI was auto-generated or user-drawn
   }
   overlay_image?: string // base64 PNG with ROI + boxes drawn
   overlay_image_base64?: string // Alternative field name for overlay image
@@ -150,15 +151,16 @@ export default function ReliabilityResults({
     ctx.lineWidth = 3
     ctx.strokeRect(roiX1, roiY1, roiWidth, roiHeight)
 
-    // Draw ROI label background
+    // Draw ROI label background with source indicator
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
-    const labelText = 'CRITICAL ZONE (assumed safe)'
+    const roiSource = data.debug.roi_source || 'AUTO'
+    const labelText = `CRITICAL ZONE (${roiSource})`
     ctx.font = 'bold 14px sans-serif'
     const labelMetrics = ctx.measureText(labelText)
     const labelHeight = 20
     const labelY = Math.max(roiY1 - 10, labelHeight + 10)
     ctx.fillRect(roiX1, labelY - labelHeight - 5, labelMetrics.width + 10, labelHeight + 10)
-    ctx.fillStyle = '#ef4444'
+    ctx.fillStyle = roiSource === 'USER' ? '#4ade80' : '#ef4444' // Green for USER, red for AUTO
     ctx.fillText(labelText, roiX1 + 5, labelY)
 
     // Draw person boxes (green)
@@ -182,7 +184,8 @@ export default function ReliabilityResults({
       ctx.restore()
     }
 
-    // Draw camera recommendation arrow if reliability is low
+    // Draw camera recommendation arrow only for NOT RELIABLE cases
+    // Action text should match the arrow recommendation
     const isReliable = data.reliability_label === 'RELIABLE'
     if (!isReliable && data.reliability_score < 70) {
       // Calculate recommended camera position: opposite side of ROI
@@ -385,441 +388,285 @@ export default function ReliabilityResults({
       )}
       
       <div className="space-y-6">
-      {/* Card 1: Reliability Status (BIG) */}
-      <Card className="glass-effect sleek-shadow border-gray-800">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2 text-xl">
-            {isReliable ? (
-              <CheckCircle2 className="w-6 h-6 text-green-400" />
-            ) : (
-              <XCircle className="w-6 h-6 text-red-400" />
-            )}
-            Reliability Status
-            {data.grok_insights && (
-              <span className="ml-auto flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full border border-purple-500/30 animate-pulse">
-                <Sparkles className="w-3 h-3" />
-                AI
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-6">
-            {/* Big Score Display with Recharts Gauge */}
-            <div className="text-center relative">
-              <div className="w-full max-w-xs mx-auto mb-4">
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie
-                      data={[
-                        { name: 'Score', value: Math.max(0, Math.min(100, data.reliability_score)), fill: isReliable ? '#4ade80' : '#ef4444' },
-                        { name: 'Remaining', value: Math.max(0, 100 - data.reliability_score), fill: '#1f2937' }
-                      ]}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      startAngle={90}
-                      endAngle={-270}
-                      dataKey="value"
-                      animationDuration={1000}
-                    >
-                      <Cell key="score" fill={isReliable ? '#4ade80' : '#ef4444'} />
-                      <Cell key="remaining" fill="#1f2937" />
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ marginTop: '-200px', height: '200px' }}>
-                  <div className={`font-bold text-4xl ${scoreColor} mb-1`}>
-                    {Math.max(0, Math.min(100, data.reliability_score))}
-                  </div>
-                  <div className={`font-bold text-lg ${scoreColor}`}>
-                    {data.reliability_label}
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            {/* Early vs Standard Alert Times */}
-            <div className="pt-4 border-t border-gray-800 space-y-3">
-              <div className="flex items-center justify-between p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-green-400" />
-                  <span className="text-sm text-gray-300">Early Alert (XUUG):</span>
-                </div>
-                <span className="text-green-400 font-bold">
-                  {hasEarlyAlert ? `${data.timestamps.flip_at_s.toFixed(1)}s` : 'N/A'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-orange-400" />
-                  <span className="text-sm text-gray-300">Standard AI Alert:</span>
-                </div>
-                <span className="text-orange-400 font-bold">
-                  {data.timestamps.standard_not_triggered 
-                    ? `> clip length (not triggered)`
-                    : hasStandardAlert 
-                      ? `${data.timestamps.standard_ai_alert_at_s.toFixed(1)}s`
-                      : 'N/A'}
-                </span>
-              </div>
-              {alertDifference && parseFloat(alertDifference) > 0 && (
-                <div className="text-xs text-green-400 text-center pt-2">
-                  ⚡ {alertDifference}s faster detection
-                </div>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Card 2: Coverage Analysis */}
-      <Card className="glass-effect sleek-shadow border-gray-800">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
-            <Eye className="w-5 h-5" />
-            Coverage Analysis
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {videoUrl && (
-              <div className="relative rounded-lg overflow-hidden border border-gray-700">
-                {data.overlay_image || data.overlay_image_base64 ? (
-                  <div className="relative group cursor-pointer" onClick={() => setOverlayZoomed(true)}>
-                    <img
-                      src={`data:image/png;base64,${data.overlay_image || data.overlay_image_base64}`}
-                      alt="ROI Overlay with Person Boxes"
-                      className="w-full transition-transform group-hover:scale-105"
-                    />
-                    <div className="absolute top-2 right-2 bg-black/50 rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Maximize2 className="w-4 h-4 text-white" />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="relative w-full aspect-video bg-gray-900">
-                    <video
-                      src={videoUrl}
-                      className="w-full h-full object-contain"
-                      controls={false}
-                    />
-                    {/* Draw ROI rectangle */}
-                    <div
-                      className="absolute border-2 border-red-500 bg-red-500/10"
-                      style={{
-                        left: `${data.debug.roi[0] * 100}%`,
-                        top: `${data.debug.roi[1] * 100}%`,
-                        width: `${(data.debug.roi[2] - data.debug.roi[0]) * 100}%`,
-                        height: `${(data.debug.roi[3] - data.debug.roi[1]) * 100}%`,
-                      }}
-                    >
-                      <div className="absolute -top-6 left-0 text-xs text-red-400 font-bold bg-black/80 px-2 py-1 rounded">
-                        CRITICAL ZONE (assumed safe)
+        {/* Top Row: Score Sidebar + Video Player */}
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Left Sidebar: Score + Alert Timing (Compact) */}
+          <div className="lg:col-span-1">
+            <Card className="glass-effect sleek-shadow border-gray-800 h-full">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  {isReliable ? (
+                    <CheckCircle2 className="w-5 h-5 text-green-400" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-red-400" />
+                  )}
+                  Status
+                  {data.grok_insights && (
+                    <span className="ml-auto flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full border border-purple-500/30 animate-pulse">
+                      <Sparkles className="w-3 h-3" />
+                      AI
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {/* Compact Score Gauge */}
+                  <div className="text-center relative">
+                    <div className="w-full mx-auto">
+                      <ResponsiveContainer width="100%" height={150}>
+                        <PieChart>
+                          <Pie
+                            data={[
+                              { name: 'Score', value: Math.max(0, Math.min(100, data.reliability_score)), fill: isReliable ? '#4ade80' : '#ef4444' },
+                              { name: 'Remaining', value: Math.max(0, 100 - data.reliability_score), fill: '#1f2937' }
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={45}
+                            outerRadius={60}
+                            startAngle={90}
+                            endAngle={-270}
+                            dataKey="value"
+                            animationDuration={1000}
+                          >
+                            <Cell key="score" fill={isReliable ? '#4ade80' : '#ef4444'} />
+                            <Cell key="remaining" fill="#1f2937" />
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ marginTop: '-150px', height: '150px' }}>
+                        <div className={`font-bold text-3xl ${scoreColor} mb-1`}>
+                          {Math.max(0, Math.min(100, data.reliability_score))}
+                        </div>
+                        <div className={`font-bold text-sm ${scoreColor}`}>
+                          {data.reliability_label}
+                        </div>
                       </div>
                     </div>
-                    
-                    {/* Draw person boxes and occluded area from frame data */}
-                    {data.all_frames && data.all_frames.length > 0 && (() => {
-                      // Use the frame with max occlusion for overlay
-                      const maxOcclusionFrame = data.all_frames.reduce((max, f) => 
-                        f.occlusion_pct > max.occlusion_pct ? f : max
-                      )
-                      
-                      return (
-                        <>
-                          {/* Draw person bounding boxes */}
-                          {maxOcclusionFrame.person_boxes.map((box, idx) => (
-                            <div
-                              key={idx}
-                              className="absolute border-2 border-green-400 bg-green-400/20"
-                              style={{
-                                left: `${box.x1 * 100}%`,
-                                top: `${box.y1 * 100}%`,
-                                width: `${(box.x2 - box.x1) * 100}%`,
-                                height: `${(box.y2 - box.y1) * 100}%`,
-                              }}
-                            />
-                          ))}
-                          
-                          {/* Show occluded area within ROI (semi-transparent red overlay) */}
-                          <div
-                            className="absolute bg-red-500/40 pointer-events-none"
-                            style={{
-                              left: `${data.debug.roi[0] * 100}%`,
-                              top: `${data.debug.roi[1] * 100}%`,
-                              width: `${(data.debug.roi[2] - data.debug.roi[0]) * 100}%`,
-                              height: `${(data.debug.roi[3] - data.debug.roi[1]) * 100}%`,
-                              clipPath: `inset(${(1 - Math.min(100, maxOcclusionFrame.occlusion_pct) / 100) * 100}% 0 0 0)`,
-                            }}
-                          />
-                        </>
-                      )
-                    })()}
                   </div>
-                )}
-              </div>
-            )}
-            
-            {/* Jump to Alert Button + Alert Frame Thumbnail */}
-            {hasEarlyAlert && (
-              <div className="space-y-3">
-                <Button
-                  onClick={handleJumpToAlert}
-                  className="w-full bg-yellow-600 hover:bg-yellow-700 text-white flex items-center justify-center gap-2"
-                >
-                  <Clock className="w-4 h-4" />
-                  Jump to Alert ({data.timestamps.flip_at_s.toFixed(1)}s)
-                </Button>
-                
-                {/* Alert Frame Thumbnail beside player */}
-                {videoUrl && (
-                  <div className="flex gap-4 items-start">
-                    <div className="flex-1 relative">
-                      <video
-                        ref={videoRef}
-                        src={videoUrl}
-                        controls
-                        className="w-full rounded-lg"
-                        style={{ maxHeight: '300px' }}
-                      />
-                      {/* Canvas overlay for real-time rendering */}
-                      {data.all_frames && data.all_frames.length > 0 && (
-                        <canvas
-                          ref={canvasRef}
-                          className="absolute top-0 left-0 w-full h-full pointer-events-none rounded-lg"
-                          style={{ maxHeight: '300px', objectFit: 'contain' }}
-                        />
-                      )}
+                  
+                  {/* Alert Times (Compact) */}
+                  <div className="space-y-2 pt-2 border-t border-gray-800">
+                    <div className="flex items-center justify-between p-2 bg-green-500/10 border border-green-500/30 rounded">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-green-400" />
+                        <span className="text-xs text-gray-300">Early Alert:</span>
+                      </div>
+                      <span className="text-green-400 font-bold text-xs">
+                        {hasEarlyAlert ? `${data.timestamps.flip_at_s.toFixed(1)}s` : (isReliable ? 'No breach' : 'N/A')}
+                      </span>
                     </div>
-                    {data.alert_frame && (
-                      <div className="w-48 aspect-video bg-gray-900 rounded-lg border border-gray-700 overflow-hidden flex-shrink-0">
-                        <img
-                          src={`data:image/png;base64,${data.alert_frame}`}
-                          alt="Alert frame with ROI and person boxes"
+                    <div className="flex items-center justify-between p-2 bg-orange-500/10 border border-orange-500/30 rounded">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-orange-400" />
+                        <span className="text-xs text-gray-300">Standard:</span>
+                      </div>
+                      <span className="text-orange-400 font-bold text-xs">
+                        {data.timestamps.standard_not_triggered 
+                          ? 'Not triggered'
+                          : hasStandardAlert 
+                            ? `${data.timestamps.standard_ai_alert_at_s.toFixed(1)}s`
+                            : (isReliable ? 'No breach' : 'N/A')}
+                      </span>
+                    </div>
+                    {alertDifference && parseFloat(alertDifference) > 0 && (
+                      <div className="text-xs text-green-400 text-center pt-1">
+                        ⚡ {alertDifference}s faster
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right/Main: Video Player with Overlay (Prominent) */}
+          <div className="lg:col-span-2">
+            <Card className="glass-effect sleek-shadow border-gray-800 h-full">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Eye className="w-5 h-5" />
+                  Video Analysis
+                  {hasEarlyAlert && (
+                    <Button
+                      onClick={handleJumpToAlert}
+                      size="sm"
+                      className="ml-auto bg-yellow-600 hover:bg-yellow-700 text-white"
+                    >
+                      <Clock className="w-3 h-3 mr-1" />
+                      Jump to Alert ({data.timestamps.flip_at_s.toFixed(1)}s)
+                    </Button>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {/* Main Video Player with Live Overlay */}
+                  {videoUrl ? (
+                    <div className="relative rounded-lg overflow-hidden border border-gray-700 bg-gray-900">
+                      <div className="relative w-full aspect-video">
+                        <video
+                          ref={videoRef}
+                          src={videoUrl}
+                          controls
                           className="w-full h-full object-contain"
                         />
+                        {/* Canvas overlay for real-time rendering */}
+                        {data.all_frames && data.all_frames.length > 0 && (
+                          <canvas
+                            ref={canvasRef}
+                            className="absolute top-0 left-0 w-full h-full pointer-events-none rounded-lg"
+                            style={{ objectFit: 'contain' }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ) : (data.overlay_image || data.overlay_image_base64) ? (
+                    <div className="relative rounded-lg overflow-hidden border border-gray-700 bg-gray-900">
+                      <div className="relative group cursor-pointer" onClick={() => setOverlayZoomed(true)}>
+                        <img
+                          src={`data:image/png;base64,${data.overlay_image || data.overlay_image_base64}`}
+                          alt="ROI Overlay with Person Boxes"
+                          className="w-full transition-transform group-hover:scale-105"
+                        />
+                        <div className="absolute top-2 right-2 bg-black/50 rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Maximize2 className="w-4 h-4 text-white" />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  
+                  {/* Metrics Grid (Compact) */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-gray-800">
+                    <div className="text-center p-2 bg-gray-900/50 rounded">
+                      <div className="text-xs text-gray-400 mb-1">Occlusion (avg)</div>
+                      <div className="text-white font-bold text-sm">
+                        {Math.min(100, Math.max(0, data.signals.occlusion_pct_avg)).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="text-center p-2 bg-gray-900/50 rounded">
+                      <div className="text-xs text-gray-400 mb-1">Occlusion (max)</div>
+                      <div className="text-white font-bold text-sm">
+                        {Math.min(100, Math.max(0, data.signals.occlusion_pct_max)).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="text-center p-2 bg-gray-900/50 rounded">
+                      <div className="text-xs text-gray-400 mb-1">Dwell time</div>
+                      <div className="text-white font-bold text-sm">
+                        {data.signals.dwell_s_max.toFixed(1)}s
+                      </div>
+                    </div>
+                    <div className="text-center p-2 bg-gray-900/50 rounded">
+                      <div className="text-xs text-gray-400 mb-1">Blur score</div>
+                      <div className="text-white font-bold text-sm">
+                        {data.signals.blur_score_avg > 0 ? data.signals.blur_score_avg.toFixed(0) : '0 (blurry)'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Bottom Row: Recommendations + Details (Full Width) */}
+        <Card className="glass-effect sleek-shadow border-gray-800">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center gap-2">
+              <Shield className="w-5 h-5" />
+              Recommendations & Analysis
+              {data.grok_insights && (
+                <span className="ml-auto flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full border border-purple-500/30">
+                  <Sparkles className="w-3 h-3" />
+                  AI Enhanced
+                </span>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Left: Why & Action */}
+              <div className="space-y-4">
+                {/* Why (one sentence max, styled as quote) */}
+                <div className="border-l-4 border-gray-600 pl-4 py-2">
+                  <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Why</h4>
+                  <p className="text-white text-sm italic">
+                    "{(() => {
+                      const firstSentenceMatch = data.why.match(/^[^.!?]+[.!?]/)
+                      return firstSentenceMatch ? firstSentenceMatch[0].trim() : data.why.split(/[.!?]/)[0] + '.'
+                    })()}"
+                  </p>
+                </div>
+                
+                {/* Recommended Action (styled as quote) */}
+                <div className="border-l-4 border-gray-600 pl-4 py-2">
+                  <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Action</h4>
+                  <p className="text-white font-medium italic">"{data.action}"</p>
+                </div>
+                
+                {/* Share Report Button */}
+                <Button
+                  onClick={() => {
+                    const reportData = {
+                      reliability_score: data.reliability_score,
+                      reliability_label: data.reliability_label,
+                      why: data.why,
+                      action: data.action,
+                      grok_insights: data.grok_insights,
+                      signals: data.signals,
+                      timestamps: data.timestamps,
+                      debug: data.debug,
+                      generated_at: new Date().toISOString()
+                    }
+                    
+                    // Download as JSON
+                    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `xuug-report-${Date.now()}.json`
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  }}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  Share Report (JSON)
+                </Button>
+              </div>
+
+              {/* Right: Grok AI Insights */}
+              <div className="space-y-4">
+                {data.grok_insights && (
+                  <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg overflow-hidden h-full">
+                    <button
+                      onClick={() => setGrokExpanded(!grokExpanded)}
+                      className="w-full flex items-center justify-between p-4 hover:bg-purple-500/5 transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-purple-400" />
+                        <h4 className="text-purple-400 text-sm font-semibold">Grok AI Analysis</h4>
+                      </div>
+                      {grokExpanded ? (
+                        <ChevronUp className="w-4 h-4 text-purple-400" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-purple-400" />
+                      )}
+                    </button>
+                    {grokExpanded && (
+                      <div className="px-4 pb-4">
+                        <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{data.grok_insights}</p>
                       </div>
                     )}
                   </div>
                 )}
-                
-                {!videoUrl && data.alert_frame && (
-                  <div className="relative w-full max-w-xs aspect-video bg-gray-900 rounded-lg border border-gray-700 overflow-hidden">
-                    <img
-                      src={`data:image/png;base64,${data.alert_frame}`}
-                      alt="Alert frame with ROI and person boxes"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* Legacy alert frame display (if no videoUrl) */}
-            {hasEarlyAlert && !videoUrl && !data.alert_frame && data.frame_data && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <Clock className="w-4 h-4" />
-                  <span>Alert Frame at {data.timestamps.flip_at_s.toFixed(1)}s</span>
-                </div>
-                <div className="relative w-full max-w-xs aspect-video bg-gray-900 rounded-lg border border-gray-700 overflow-hidden">
-                  {data.frame_data ? (
-                    <>
-                      {/* Show video frame with overlay */}
-                      {videoUrl && (
-                        <video
-                          src={videoUrl}
-                          className="w-full h-full object-contain"
-                          controls={false}
-                          style={{ position: 'absolute', top: 0, left: 0 }}
-                        />
-                      )}
-                      {/* Draw ROI */}
-                      <div
-                        className="absolute border-2 border-red-500 bg-red-500/10"
-                        style={{
-                          left: `${data.debug.roi[0] * 100}%`,
-                          top: `${data.debug.roi[1] * 100}%`,
-                          width: `${(data.debug.roi[2] - data.debug.roi[0]) * 100}%`,
-                          height: `${(data.debug.roi[3] - data.debug.roi[1]) * 100}%`,
-                        }}
-                      />
-                      {/* Draw person boxes at alert time */}
-                      {data.frame_data.person_boxes.map((box, idx) => (
-                        <div
-                          key={idx}
-                          className="absolute border-2 border-yellow-400 bg-yellow-400/30"
-                          style={{
-                            left: `${box.x1 * 100}%`,
-                            top: `${box.y1 * 100}%`,
-                            width: `${(box.x2 - box.x1) * 100}%`,
-                            height: `${(box.y2 - box.y1) * 100}%`,
-                          }}
-                        />
-                      ))}
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-gray-400">Occlusion (avg):</span>
-                <span className="text-white ml-2 font-semibold">
-                  {Math.min(100, Math.max(0, data.signals.occlusion_pct_avg)).toFixed(1)}%
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-400">Occlusion (max):</span>
-                <span className="text-white ml-2 font-semibold">
-                  {Math.min(100, Math.max(0, data.signals.occlusion_pct_max)).toFixed(1)}%
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-400">Dwell time:</span>
-                <span className="text-white ml-2 font-semibold">
-                  {data.signals.dwell_s_max.toFixed(1)}s
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-400">Blur score:</span>
-                <span className="text-white ml-2 font-semibold">
-                  {data.signals.blur_score_avg.toFixed(0)}
-                </span>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Card 3: Recommendations + Timing */}
-      <Card className="glass-effect sleek-shadow border-gray-800">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center gap-2">
-            <Shield className="w-5 h-5" />
-            Recommendations
-            {data.grok_insights && (
-              <span className="ml-auto flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full border border-purple-500/30">
-                <Sparkles className="w-3 h-3" />
-                AI Enhanced
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {/* Why (one sentence max, styled as quote) */}
-            <div className="border-l-4 border-gray-600 pl-4 py-2">
-              <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Why</h4>
-              <p className="text-white text-sm italic">
-                "{(() => {
-                  const firstSentenceMatch = data.why.match(/^[^.!?]+[.!?]/)
-                  return firstSentenceMatch ? firstSentenceMatch[0].trim() : data.why.split(/[.!?]/)[0] + '.'
-                })()}"
-              </p>
-            </div>
-            
-            {/* Recommended Action (styled as quote) */}
-            <div className="border-l-4 border-gray-600 pl-4 py-2">
-              <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Action</h4>
-              <p className="text-white font-medium italic">"{data.action}"</p>
-            </div>
-            
-            {/* Share Report Button */}
-            <div className="pt-4 border-t border-gray-800">
-              <Button
-                onClick={() => {
-                  const reportData = {
-                    reliability_score: data.reliability_score,
-                    reliability_label: data.reliability_label,
-                    why: data.why,
-                    action: data.action,
-                    signals: data.signals,
-                    timestamps: data.timestamps,
-                    generated_at: new Date().toISOString()
-                  }
-                  
-                  // Download as JSON
-                  const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' })
-                  const url = URL.createObjectURL(blob)
-                  const a = document.createElement('a')
-                  a.href = url
-                  a.download = `xuug-report-${Date.now()}.json`
-                  document.body.appendChild(a)
-                  a.click()
-                  document.body.removeChild(a)
-                  URL.revokeObjectURL(url)
-                }}
-                className="w-full bg-gray-800 hover:bg-gray-700 text-white flex items-center justify-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                Share Report (JSON)
-              </Button>
-            </div>
-            
-            {/* Grok AI Insights Section (Expandable) */}
-            {data.grok_insights && (
-              <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setGrokExpanded(!grokExpanded)}
-                  className="w-full flex items-center justify-between p-4 hover:bg-purple-500/5 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-400" />
-                    <h4 className="text-purple-400 text-sm font-semibold">Grok AI Analysis</h4>
-                  </div>
-                  {grokExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-purple-400" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-purple-400" />
-                  )}
-                </button>
-                {grokExpanded && (
-                  <div className="px-4 pb-4">
-                    <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{data.grok_insights}</p>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* Timing Comparison */}
-            <div className="pt-4 border-t border-gray-800">
-              <h4 className="text-gray-400 text-sm mb-3">Alert Timing:</h4>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-green-400" />
-                    <span className="text-sm text-gray-300">Early Alert (XUUG):</span>
-                  </div>
-                  <span className="text-green-400 font-bold">
-                    {hasEarlyAlert ? `${data.timestamps.flip_at_s.toFixed(1)}s` : 'N/A'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-orange-400" />
-                    <span className="text-sm text-gray-300">Standard AI Alert:</span>
-                  </div>
-                  <span className="text-orange-400 font-bold">
-                    {data.timestamps.standard_not_triggered 
-                      ? `> clip length (not triggered)`
-                      : hasStandardAlert 
-                        ? `${data.timestamps.standard_ai_alert_at_s.toFixed(1)}s`
-                        : 'not triggered in clip'}
-                  </span>
-                </div>
-                {alertDifference && parseFloat(alertDifference) > 0 && (
-                  <div className="text-xs text-gray-400 text-center pt-2">
-                    ⚡ {alertDifference}s faster detection
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
       </div>
     </>
   )
