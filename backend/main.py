@@ -303,15 +303,6 @@ def draw_overlay(frame: np.ndarray, roi: List[float], person_boxes: List[Tuple[f
         rel_color = (0, 255, 0) if reliability_score >= 70 else (0, 0, 255)  # Green or Red
         cv2.rectangle(overlay, (10, rel_y - rel_height - 5), (10 + rel_width + 10, rel_y + 5), bg_color, -1)
         cv2.putText(overlay, reliability_text, (15, rel_y), font, font_scale, rel_color, thickness, cv2.LINE_AA)
-        
-        # 4. ASSUMPTION INVALID ❌ (only when reliability_score < 70)
-        if reliability_score < 70:
-            invalid_text = "ASSUMPTION INVALID ❌"
-            (inv_width, inv_height), _ = cv2.getTextSize(invalid_text, font, font_scale, thickness)
-            inv_y = rel_y + line_spacing
-            # Red background for invalid assumption
-            cv2.rectangle(overlay, (10, inv_y - inv_height - 5), (10 + inv_width + 10, inv_y + 5), (0, 0, 255), -1)  # Red background
-            cv2.putText(overlay, invalid_text, (15, inv_y), font, font_scale, text_color, thickness, cv2.LINE_AA)
     
     return overlay
 

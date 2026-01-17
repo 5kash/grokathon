@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, XCircle, AlertTriangle, Eye, Shield, Clock, Sparkles } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertTriangle, Eye, Shield, Clock, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface ReliabilityData {
   reliability_label: 'RELIABLE' | 'NOT RELIABLE'
@@ -58,6 +58,8 @@ export default function ReliabilityResults({
 }: ReliabilityResultsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameRef = useRef<number | null>(null)
+  const [loadingStep, setLoadingStep] = useState<'extracting' | 'detecting' | 'scoring'>('extracting')
+  const [grokExpanded, setGrokExpanded] = useState(false)
   
   const handleJumpToAlert = () => {
     if (videoRef?.current && data?.timestamps.flip_at_s) {
@@ -65,7 +67,6 @@ export default function ReliabilityResults({
       videoRef.current.pause()
     }
   }
-  const [loadingStep, setLoadingStep] = useState<'extracting' | 'detecting' | 'scoring'>('extracting')
   
   // Simulate loading steps (in real app, this would come from backend progress)
   React.useEffect(() => {
@@ -79,6 +80,15 @@ export default function ReliabilityResults({
       }
     }
   }, [isAnalyzing])
+
+  // Debug: Log if Grok insights are present (must be before any conditional returns)
+  React.useEffect(() => {
+    if (data?.grok_insights) {
+      console.log('[ReliabilityResults] Grok insights detected:', data.grok_insights.substring(0, 50) + '...')
+    } else if (data) {
+      console.log('[ReliabilityResults] No Grok insights in data')
+    }
+  }, [data?.grok_insights])
 
   // Find nearest frame based on timestamp
   const findNearestFrame = useCallback((currentTime: number) => {
@@ -159,10 +169,79 @@ export default function ReliabilityResults({
       ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
     })
 
-    // Draw occlusion shading (semi-transparent red overlay within ROI)
+    // Draw occlusion shading (semi-transparent red overlay within ROI, clipped by occlusion percentage)
     if (frame.occlusion_pct > 0) {
+      ctx.save()
       ctx.fillStyle = 'rgba(239, 68, 68, 0.4)' // red-500 with 40% opacity
-      ctx.fillRect(roiX1, roiY1, roiWidth, roiHeight)
+      // Clip to show only the occluded portion (from bottom up)
+      const occlusionHeight = (frame.occlusion_pct / 100) * roiHeight
+      ctx.fillRect(roiX1, roiY2 - occlusionHeight, roiWidth, occlusionHeight)
+      ctx.restore()
+    }
+
+    // Draw camera recommendation arrow if reliability is low
+    const isReliable = data.reliability_label === 'RELIABLE'
+    if (!isReliable && data.reliability_score < 70) {
+      // Calculate recommended camera position: opposite side of ROI
+      const roiCenterX = (roiX1 + roiX2) / 2
+      const roiCenterY = (roiY1 + roiY2) / 2
+      
+      // Place arrow on opposite side of frame from ROI center
+      // If ROI is on left side, recommend camera on right, and vice versa
+      const arrowX = roiCenterX < w / 2 ? w * 0.85 : w * 0.15
+      const arrowY = h * 0.2 // Top 20% of frame
+      
+      // Draw arrow pointing to ROI
+      ctx.save()
+      ctx.strokeStyle = '#fbbf24' // amber-400
+      ctx.fillStyle = '#fbbf24'
+      ctx.lineWidth = 3
+      
+      // Arrow line
+      ctx.beginPath()
+      ctx.moveTo(arrowX, arrowY)
+      ctx.lineTo(roiCenterX, roiCenterY)
+      ctx.stroke()
+      
+      // Arrowhead
+      const angle = Math.atan2(roiCenterY - arrowY, roiCenterX - arrowX)
+      const arrowLength = 20
+      const arrowAngle = Math.PI / 6 // 30 degrees
+      
+      ctx.beginPath()
+      ctx.moveTo(roiCenterX, roiCenterY)
+      ctx.lineTo(
+        roiCenterX - arrowLength * Math.cos(angle - arrowAngle),
+        roiCenterY - arrowLength * Math.sin(angle - arrowAngle)
+      )
+      ctx.lineTo(
+        roiCenterX - arrowLength * Math.cos(angle + arrowAngle),
+        roiCenterY - arrowLength * Math.sin(angle + arrowAngle)
+      )
+      ctx.closePath()
+      ctx.fill()
+      
+      // Draw label background
+      const labelText = 'ADD CAMERA HERE'
+      ctx.font = 'bold 16px sans-serif'
+      const labelMetrics = ctx.measureText(labelText)
+      const labelPadding = 8
+      const labelX = arrowX - labelMetrics.width / 2
+      const labelY = arrowY - 30
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'
+      ctx.fillRect(
+        labelX - labelPadding,
+        labelY - 20,
+        labelMetrics.width + labelPadding * 2,
+        24
+      )
+      
+      // Draw label text
+      ctx.fillStyle = '#fbbf24'
+      ctx.fillText(labelText, labelX, labelY)
+      
+      ctx.restore()
     }
   }, [videoRef, data, findNearestFrame])
 
@@ -582,22 +661,47 @@ export default function ReliabilityResults({
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {/* Grok AI Insights Section */}
-            {data.grok_insights && (
-              <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg p-4 space-y-2">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                  <h4 className="text-purple-400 text-sm font-semibold">Grok AI Analysis</h4>
-                </div>
-                <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{data.grok_insights}</p>
-              </div>
-            )}
+            {/* Why (one sentence max) */}
+            <div>
+              <h4 className="text-gray-400 text-sm mb-2">Why:</h4>
+              <p className="text-white text-sm">
+                {(() => {
+                  const firstSentenceMatch = data.why.match(/^[^.!?]+[.!?]/)
+                  return firstSentenceMatch ? firstSentenceMatch[0].trim() : data.why.split(/[.!?]/)[0] + '.'
+                })()}
+              </p>
+            </div>
             
-            {/* Only show action here - no duplicate "why" */}
+            {/* Recommended Action */}
             <div>
               <h4 className="text-gray-400 text-sm mb-2">Recommended Action:</h4>
               <p className="text-white font-medium">{data.action}</p>
             </div>
+            
+            {/* Grok AI Insights Section (Expandable) */}
+            {data.grok_insights && (
+              <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setGrokExpanded(!grokExpanded)}
+                  className="w-full flex items-center justify-between p-4 hover:bg-purple-500/5 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-400" />
+                    <h4 className="text-purple-400 text-sm font-semibold">Grok AI Analysis</h4>
+                  </div>
+                  {grokExpanded ? (
+                    <ChevronUp className="w-4 h-4 text-purple-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-purple-400" />
+                  )}
+                </button>
+                {grokExpanded && (
+                  <div className="px-4 pb-4">
+                    <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{data.grok_insights}</p>
+                  </div>
+                )}
+              </div>
+            )}
             
             {/* Timing Comparison */}
             <div className="pt-4 border-t border-gray-800">

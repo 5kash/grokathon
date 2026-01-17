@@ -99,15 +99,22 @@ export async function POST(request: NextRequest) {
         const data = await backendResponse.json()
         const elapsed = Date.now() - startTime
         console.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
+        console.log('[Reliability API] Backend response keys:', Object.keys(data))
+        console.log('[Reliability API] Has overlay_image:', !!data.overlay_image)
+        console.log('[Reliability API] Has alert_frame:', !!data.alert_frame)
         
-        // Enhance with Grok AI insights if available and we have frames
+        // Enhance with Grok AI insights if available
         const grokApiKey = process.env.GROK_API_KEY
-        if (grokApiKey && (data.overlay_image || data.alert_frame)) {
+        if (grokApiKey) {
           try {
-            // Use alert_frame if available (most relevant), otherwise overlay_image
-            const frameToAnalyze = data.alert_frame || data.overlay_image
+            console.log('[Reliability API] Attempting Grok AI enhancement with backend data...')
             
-            const grokPrompt = `You are analyzing CCTV reliability analysis results. I'm providing you with a frame from the video that shows the critical zone and detected persons. Based on this frame and the reliability metrics:
+            // Use alert_frame if available (most relevant), otherwise overlay_image, otherwise metrics-only
+            const frameToAnalyze = data.alert_frame || data.overlay_image
+            const hasFrame = !!frameToAnalyze
+            
+            const grokPrompt = hasFrame
+              ? `You are analyzing CCTV reliability analysis results. I'm providing you with a frame from the video that shows the critical zone and detected persons. Based on this frame and the reliability metrics:
 - Reliability Score: ${data.reliability_score}/100 (${data.reliability_label})
 - Maximum Occlusion: ${data.signals.occlusion_pct_max}%
 - Average Occlusion: ${data.signals.occlusion_pct_avg}%
@@ -115,9 +122,44 @@ export async function POST(request: NextRequest) {
 - Early Alert Time: ${data.timestamps.flip_at_s}s
 
 Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${data.reliability_label.toLowerCase()} and specific recommendations for improvement.`
+              : `You are analyzing CCTV reliability data. Based on these metrics:
+- Reliability Score: ${data.reliability_score}/100 (${data.reliability_label})
+- Maximum Occlusion: ${data.signals.occlusion_pct_max}%
+- Average Occlusion: ${data.signals.occlusion_pct_avg}%
+- Maximum Dwell Time: ${data.signals.dwell_s_max}s
+- Early Alert Time: ${data.timestamps.flip_at_s}s
+
+Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${data.reliability_label.toLowerCase()} and specific recommendations for improvement. Focus on the occlusion, dwell time, and reliability metrics.`
 
             const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
             const modelName = process.env.GROK_MODEL || 'grok-beta'
+            
+            const grokRequestBody: any = {
+              model: modelName,
+              messages: [
+                {
+                  role: 'user',
+                  content: hasFrame
+                    ? [
+                        {
+                          type: 'text',
+                          text: grokPrompt,
+                        },
+                        {
+                          type: 'image_url',
+                          image_url: {
+                            url: `data:image/png;base64,${frameToAnalyze}`,
+                          },
+                        },
+                      ]
+                    : grokPrompt,
+                },
+              ],
+              max_tokens: 400,
+              temperature: 0.7,
+            }
+            
+            console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}, hasFrame: ${hasFrame}`)
             
             const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
               method: 'POST',
@@ -125,34 +167,14 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
                 'Authorization': `Bearer ${grokApiKey}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({
-                model: modelName,
-                messages: [
-                  {
-                    role: 'user',
-                    content: [
-                      {
-                        type: 'text',
-                        text: grokPrompt,
-                      },
-                      {
-                        type: 'image_url',
-                        image_url: {
-                          url: `data:image/png;base64,${frameToAnalyze}`,
-                        },
-                      },
-                    ],
-                  },
-                ],
-                max_tokens: 400,
-                temperature: 0.7,
-              }),
+              body: JSON.stringify(grokRequestBody),
             })
             
             if (grokResponse.ok) {
               const grokData = await grokResponse.json()
               const grokInsights = grokData.choices?.[0]?.message?.content || null
               if (grokInsights) {
+                console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
                 data.grok_insights = grokInsights
                 // Optionally enhance why and action with Grok insights
                 const lines = grokInsights.split('\n').filter(l => l.trim())
@@ -165,12 +187,19 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
                     data.action = lines.slice(1).join(' ').trim()
                   }
                 }
+              } else {
+                console.warn('[Reliability API] Grok response had no content')
               }
+            } else {
+              const errorText = await grokResponse.text()
+              console.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
             }
           } catch (grokError) {
-            console.warn('[Reliability API] Grok enhancement failed:', grokError)
+            console.error('[Reliability API] Grok enhancement failed:', grokError)
             // Continue without Grok enhancement
           }
+        } else {
+          console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
         }
         
         return NextResponse.json(data)
@@ -494,6 +523,7 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
       const grokApiKey = process.env.GROK_API_KEY
       if (grokApiKey) {
         try {
+          console.log('[Reliability API] Attempting Grok AI enhancement...')
           // Use metrics-based analysis for mock mode
           // (Backend mode uses actual frames - see backend response handling above)
           const grokPrompt = `You are analyzing CCTV reliability data. Based on these metrics:
@@ -508,6 +538,8 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
 
           const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
           const modelName = process.env.GROK_MODEL || 'grok-beta'
+          
+          console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}`)
           
           const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
             method: 'POST',
@@ -533,15 +565,27 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
             grokInsights = grokData.choices?.[0]?.message?.content || null
             
             if (grokInsights) {
+              console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
               // Parse Grok response to extract why and action
               const lines = grokInsights.split('\n').filter(l => l.trim())
-              why = lines[0] || `Single view with ${occlusionText} means this zone can't be verified independently.`
-              action = lines.slice(1).join(' ').trim() || 'Add overlap / reposition camera / request drone check.'
+              if (lines.length > 0 && lines[0].length > 20) {
+                why = lines[0]
+              }
+              if (lines.length > 1 && lines.slice(1).join(' ').trim().length > 10) {
+                action = lines.slice(1).join(' ').trim()
+              }
+            } else {
+              console.warn('[Reliability API] Grok response had no content')
             }
+          } else {
+            const errorText = await grokResponse.text()
+            console.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
           }
         } catch (grokError) {
-          console.warn('[Reliability API] Grok enhancement failed, using default:', grokError)
+          console.error('[Reliability API] Grok enhancement failed:', grokError)
         }
+      } else {
+        console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
       }
       
       // Fallback to templated response if Grok not available or failed
