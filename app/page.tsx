@@ -63,6 +63,19 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Trailer Video Embed */}
+          <div className="mb-16 max-w-4xl mx-auto">
+            <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-gray-800 glass-effect">
+              <iframe
+                className="w-full h-full"
+                src="https://www.youtube.com/embed/dQw4w9WgXcQ"
+                title="XUUG Trailer"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          </div>
+
           {/* Navigation Links - x.ai style */}
           <div className="flex items-center justify-center gap-8 md:gap-12 pt-16">
             <Link 

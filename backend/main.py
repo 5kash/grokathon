@@ -612,10 +612,16 @@ async def analyze_reliability(
             reliability_score = round(coverage_metrics.coverage_score)
             reliability_label = 'NOT RELIABLE' if reliability_score < 70 else 'RELIABLE'
             
-            # Generate explanation and action
+            # Generate explanation and action (will be enhanced by Grok if available)
             occlusion_text = f"{round(occlusion_pct_max)}% occlusion" if occlusion_pct_max > 5 else "minimal occlusion"
             why = f"Single view with {occlusion_text} means this zone can't be verified independently."
-            action = "Add overlap / reposition camera / request drone check."
+            # More specific fallback based on occlusion level
+            if occlusion_pct_max > 60:
+                action = "Add second camera opposite the ROI to provide coverage overlap."
+            elif occlusion_pct_max > 30:
+                action = "Reposition camera or add overhead camera to reduce occlusion."
+            else:
+                action = "Consider adding camera redundancy for critical zone coverage."
             
             # Camera recommendation heuristic
             recommendation = None

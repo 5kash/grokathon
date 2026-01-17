@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import ReliabilityResults from './ReliabilityResults'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Slider } from '@/components/ui/slider'
+import { Label } from '@/components/ui/label'
 
 interface VideoUploaderReliabilityProps {
   onAnalysisStart: () => void
@@ -24,7 +26,12 @@ export default function VideoUploaderReliability({
 }: VideoUploaderReliabilityProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [fps, setFps] = useState<number>(5)
+  const [roiPoints, setRoiPoints] = useState<Array<{ x: number; y: number }>>([])
+  const [showRoiDraw, setShowRoiDraw] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
   // Use provided videoRef or create a local one
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const actualVideoRef = videoRef || localVideoRef
@@ -32,15 +39,39 @@ export default function VideoUploaderReliability({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      if (file.type.startsWith('video/')) {
-        setSelectedFile(file)
-        const url = URL.createObjectURL(file)
-        setPreviewUrl(url)
-        onVideoUrlChange?.(url)
-      } else {
-        onError('Please select a valid video file (MP4)')
+      // Validate file type
+      if (!file.type.startsWith('video/') && !file.name.toLowerCase().endsWith('.mp4')) {
+        onError('Please select a valid MP4 video file')
+        return
       }
+      
+      // Validate file size (5-20s recommendation, but allow up to 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        onError('Video file too large. Maximum 50MB. For best results, use 5-20 second clips.')
+        return
+      }
+      
+      setSelectedFile(file)
+      const url = URL.createObjectURL(file)
+      setPreviewUrl(url)
+      onVideoUrlChange?.(url)
+      setRoiPoints([]) // Reset ROI when new file selected
     }
+  }
+
+  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current || roiPoints.length >= 4) return
+    
+    const canvas = canvasRef.current
+    const rect = canvas.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width
+    const y = (e.clientY - rect.top) / rect.height
+    
+    setRoiPoints([...roiPoints, { x, y }])
+  }, [roiPoints])
+
+  const handleClearRoi = () => {
+    setRoiPoints([])
   }
 
   const handleUpload = async () => {
@@ -49,9 +80,16 @@ export default function VideoUploaderReliability({
       return
     }
 
-    // Validate file size (reasonable limit for video processing)
-    if (selectedFile.size > 100 * 1024 * 1024) {
-      onError('Video file too large. Maximum 100MB.')
+    // Validate file size
+    if (selectedFile.size > 50 * 1024 * 1024) {
+      onError('Video file too large. Maximum 50MB. For best results, use 5-20 second clips.')
+      return
+    }
+
+    // Validate video duration (estimate from size, roughly 1MB per second for MP4)
+    const estimatedDuration = selectedFile.size / (1024 * 1024)
+    if (estimatedDuration > 20) {
+      onError('Clip too long—try <20s for best results.')
       return
     }
 
@@ -60,10 +98,16 @@ export default function VideoUploaderReliability({
     try {
       const formData = new FormData()
       formData.append('video', selectedFile)
-      // Optional: add fps parameter (default 5)
-      formData.append('fps', '5')
-      // Optional: add ROI parameter (default will be used if not provided)
-      // formData.append('roi', JSON.stringify([0.25, 0.6, 0.75, 0.95]))
+      formData.append('fps', fps.toString())
+      
+      // Add ROI if 4 points are drawn, otherwise use default
+      if (roiPoints.length === 4) {
+        // Convert points to ROI format [x1, y1, x2, y2]
+        const xs = roiPoints.map(p => p.x).sort((a, b) => a - b)
+        const ys = roiPoints.map(p => p.y).sort((a, b) => a - b)
+        const roi = [xs[0], ys[0], xs[3], ys[3]] as [number, number, number, number]
+        formData.append('roi', JSON.stringify(roi))
+      }
 
       const requestStart = Date.now()
       
@@ -178,42 +222,153 @@ export default function VideoUploaderReliability({
                 {selectedFile ? selectedFile.name : 'Click to upload MP4 video'}
               </span>
               <span className="mt-1 block text-xs text-gray-400">
-                MP4 format, up to 50MB (Vercel Pro)
+                MP4 format, 5-20s recommended, up to 50MB
               </span>
             </label>
           </div>
 
+          {/* FPS Slider */}
+          <div className="space-y-2">
+            <Label className="text-white text-sm">FPS (Frames per second): {fps}</Label>
+            <Slider
+              value={[fps]}
+              onValueChange={(value) => setFps(value[0])}
+              min={1}
+              max={10}
+              step={1}
+              disabled={isAnalyzing}
+              className="w-full"
+            />
+            <p className="text-xs text-gray-400">Lower FPS = faster processing, higher FPS = more accurate</p>
+          </div>
+
+          {/* ROI Draw Toggle */}
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="roi-draw-toggle"
+              checked={showRoiDraw}
+              onChange={(e) => setShowRoiDraw(e.target.checked)}
+              disabled={!previewUrl || isAnalyzing}
+              className="rounded"
+            />
+            <Label htmlFor="roi-draw-toggle" className="text-white text-sm cursor-pointer">
+              Draw ROI (4 points) - Optional
+            </Label>
+            {roiPoints.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClearRoi}
+                className="text-xs text-gray-400 hover:text-white"
+              >
+                Clear ({roiPoints.length}/4)
+              </Button>
+            )}
+          </div>
+
           {previewUrl && (
             <div className="relative">
-              <video
-                ref={actualVideoRef}
-                src={previewUrl}
-                controls
-                autoPlay
-                muted
-                loop
-                className="w-full rounded-lg"
-                style={{ maxHeight: '400px' }}
-              />
-              <button
-                onClick={handleClear}
-                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600"
-                disabled={isAnalyzing}
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
+              {showRoiDraw ? (
+                <div className="relative">
+                  <img
+                    ref={imageRef}
+                    src={previewUrl}
+                    alt="Video preview for ROI drawing"
+                    className="w-full rounded-lg"
+                    style={{ maxHeight: '400px', objectFit: 'contain' }}
+                    onLoad={() => {
+                      // Draw ROI points on canvas overlay
+                      const canvas = canvasRef.current
+                      const img = imageRef.current
+                      if (canvas && img) {
+                        canvas.width = img.offsetWidth
+                        canvas.height = img.offsetHeight
+                        const ctx = canvas.getContext('2d')
+                        if (ctx) {
+                          ctx.clearRect(0, 0, canvas.width, canvas.height)
+                          roiPoints.forEach((point, idx) => {
+                            const x = point.x * canvas.width
+                            const y = point.y * canvas.height
+                            ctx.fillStyle = '#4ade80'
+                            ctx.beginPath()
+                            ctx.arc(x, y, 8, 0, 2 * Math.PI)
+                            ctx.fill()
+                            ctx.fillStyle = '#fff'
+                            ctx.font = 'bold 12px sans-serif'
+                            ctx.fillText(`P${idx + 1}`, x + 12, y + 4)
+                          })
+                          if (roiPoints.length === 4) {
+                            // Draw ROI rectangle
+                            const xs = roiPoints.map(p => p.x * canvas.width).sort((a, b) => a - b)
+                            const ys = roiPoints.map(p => p.y * canvas.height).sort((a, b) => a - b)
+                            ctx.strokeStyle = '#ef4444'
+                            ctx.lineWidth = 2
+                            ctx.strokeRect(xs[0], ys[0], xs[3] - xs[0], ys[3] - ys[0])
+                          }
+                        }
+                      }
+                    }}
                   />
-                </svg>
-              </button>
+                  <canvas
+                    ref={canvasRef}
+                    onClick={handleCanvasClick}
+                    className="absolute top-0 left-0 w-full h-full cursor-crosshair rounded-lg"
+                    style={{ maxHeight: '400px' }}
+                  />
+                  <button
+                    onClick={handleClear}
+                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600 z-10"
+                    disabled={isAnalyzing}
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <video
+                    ref={actualVideoRef}
+                    src={previewUrl}
+                    controls
+                    autoPlay
+                    muted
+                    loop
+                    className="w-full rounded-lg"
+                    style={{ maxHeight: '400px' }}
+                  />
+                  <button
+                    onClick={handleClear}
+                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600"
+                    disabled={isAnalyzing}
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

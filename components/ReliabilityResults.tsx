@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, XCircle, AlertTriangle, Eye, Shield, Clock, Sparkles, ChevronDown, ChevronUp } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertTriangle, Eye, Shield, Clock, Sparkles, ChevronDown, ChevronUp, Download, Maximize2, X } from 'lucide-react'
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 
 interface ReliabilityData {
   reliability_label: 'RELIABLE' | 'NOT RELIABLE'
@@ -28,7 +29,8 @@ interface ReliabilityData {
     fps_used: number
     roi: [number, number, number, number]
   }
-  overlay_image?: string
+  overlay_image?: string // base64 PNG with ROI + boxes drawn
+  overlay_image_base64?: string // Alternative field name for overlay image
   alert_frame?: string // base64 PNG of frame at flip_at_s
   frame_data?: {
     timestamp: number
@@ -60,6 +62,7 @@ export default function ReliabilityResults({
   const animationFrameRef = useRef<number | null>(null)
   const [loadingStep, setLoadingStep] = useState<'extracting' | 'detecting' | 'scoring'>('extracting')
   const [grokExpanded, setGrokExpanded] = useState(false)
+  const [overlayZoomed, setOverlayZoomed] = useState(false)
   
   const handleJumpToAlert = () => {
     if (videoRef?.current && data?.timestamps.flip_at_s) {
@@ -358,7 +361,30 @@ export default function ReliabilityResults({
     : null
 
   return (
-    <div className="space-y-6">
+    <>
+      {/* Fullscreen Overlay Zoom Modal */}
+      {overlayZoomed && (data.overlay_image || data.overlay_image_base64) && (
+        <div 
+          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
+          onClick={() => setOverlayZoomed(false)}
+        >
+          <div className="relative max-w-7xl max-h-full">
+            <img
+              src={`data:image/png;base64,${data.overlay_image || data.overlay_image_base64}`}
+              alt="ROI Overlay Fullscreen"
+              className="max-w-full max-h-[90vh] object-contain"
+            />
+            <button
+              onClick={() => setOverlayZoomed(false)}
+              className="absolute top-4 right-4 bg-black/50 hover:bg-black/70 text-white rounded-full p-2"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+      )}
+      
+      <div className="space-y-6">
       {/* Card 1: Reliability Status (BIG) */}
       <Card className="glass-effect sleek-shadow border-gray-800">
         <CardHeader>
@@ -379,20 +405,38 @@ export default function ReliabilityResults({
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
-            {/* Big Score Display */}
-            <div className="text-center">
-              <div className={`font-bold text-5xl ${scoreColor} mb-2`}>
-                {Math.max(0, Math.min(100, data.reliability_score))}/100
-              </div>
-              <div className={`font-bold text-2xl ${scoreColor} mb-4`}>
-                {data.reliability_label}
-              </div>
-              {/* Score Gauge */}
-              <div className="w-full bg-gray-800 rounded-full h-4 overflow-hidden">
-                <div
-                  className={`h-full transition-all duration-500 ${isReliable ? 'bg-green-400' : 'bg-red-400'}`}
-                  style={{ width: `${Math.max(0, Math.min(100, data.reliability_score))}%` }}
-                />
+            {/* Big Score Display with Recharts Gauge */}
+            <div className="text-center relative">
+              <div className="w-full max-w-xs mx-auto mb-4">
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Score', value: Math.max(0, Math.min(100, data.reliability_score)), fill: isReliable ? '#4ade80' : '#ef4444' },
+                        { name: 'Remaining', value: Math.max(0, 100 - data.reliability_score), fill: '#1f2937' }
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      startAngle={90}
+                      endAngle={-270}
+                      dataKey="value"
+                      animationDuration={1000}
+                    >
+                      <Cell key="score" fill={isReliable ? '#4ade80' : '#ef4444'} />
+                      <Cell key="remaining" fill="#1f2937" />
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ marginTop: '-200px', height: '200px' }}>
+                  <div className={`font-bold text-4xl ${scoreColor} mb-1`}>
+                    {Math.max(0, Math.min(100, data.reliability_score))}
+                  </div>
+                  <div className={`font-bold text-lg ${scoreColor}`}>
+                    {data.reliability_label}
+                  </div>
+                </div>
               </div>
             </div>
             
@@ -442,12 +486,17 @@ export default function ReliabilityResults({
           <div className="space-y-4">
             {videoUrl && (
               <div className="relative rounded-lg overflow-hidden border border-gray-700">
-                {data.overlay_image ? (
-                  <img
-                    src={`data:image/png;base64,${data.overlay_image}`}
-                    alt="ROI Overlay with Person Boxes"
-                    className="w-full"
-                  />
+                {data.overlay_image || data.overlay_image_base64 ? (
+                  <div className="relative group cursor-pointer" onClick={() => setOverlayZoomed(true)}>
+                    <img
+                      src={`data:image/png;base64,${data.overlay_image || data.overlay_image_base64}`}
+                      alt="ROI Overlay with Person Boxes"
+                      className="w-full transition-transform group-hover:scale-105"
+                    />
+                    <div className="absolute top-2 right-2 bg-black/50 rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Maximize2 className="w-4 h-4 text-white" />
+                    </div>
+                  </div>
                 ) : (
                   <div className="relative w-full aspect-video bg-gray-900">
                     <video
@@ -661,21 +710,53 @@ export default function ReliabilityResults({
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {/* Why (one sentence max) */}
-            <div>
-              <h4 className="text-gray-400 text-sm mb-2">Why:</h4>
-              <p className="text-white text-sm">
-                {(() => {
+            {/* Why (one sentence max, styled as quote) */}
+            <div className="border-l-4 border-gray-600 pl-4 py-2">
+              <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Why</h4>
+              <p className="text-white text-sm italic">
+                "{(() => {
                   const firstSentenceMatch = data.why.match(/^[^.!?]+[.!?]/)
                   return firstSentenceMatch ? firstSentenceMatch[0].trim() : data.why.split(/[.!?]/)[0] + '.'
-                })()}
+                })()}"
               </p>
             </div>
             
-            {/* Recommended Action */}
-            <div>
-              <h4 className="text-gray-400 text-sm mb-2">Recommended Action:</h4>
-              <p className="text-white font-medium">{data.action}</p>
+            {/* Recommended Action (styled as quote) */}
+            <div className="border-l-4 border-gray-600 pl-4 py-2">
+              <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Action</h4>
+              <p className="text-white font-medium italic">"{data.action}"</p>
+            </div>
+            
+            {/* Share Report Button */}
+            <div className="pt-4 border-t border-gray-800">
+              <Button
+                onClick={() => {
+                  const reportData = {
+                    reliability_score: data.reliability_score,
+                    reliability_label: data.reliability_label,
+                    why: data.why,
+                    action: data.action,
+                    signals: data.signals,
+                    timestamps: data.timestamps,
+                    generated_at: new Date().toISOString()
+                  }
+                  
+                  // Download as JSON
+                  const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `xuug-report-${Date.now()}.json`
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  URL.revokeObjectURL(url)
+                }}
+                className="w-full bg-gray-800 hover:bg-gray-700 text-white flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Share Report (JSON)
+              </Button>
             </div>
             
             {/* Grok AI Insights Section (Expandable) */}
@@ -739,6 +820,7 @@ export default function ReliabilityResults({
           </div>
         </CardContent>
       </Card>
-    </div>
+      </div>
+    </>
   )
 }

@@ -28,6 +28,7 @@ interface ReliabilityResponse {
     roi: [number, number, number, number]
   }
   overlay_image?: string // base64 PNG with ROI + boxes drawn
+  overlay_image_base64?: string // Alternative field name for overlay image
   alert_frame?: string // base64 PNG of frame at flip_at_s
   frame_data?: {
     // Frame at flip_at_s for thumbnail
@@ -50,6 +51,10 @@ export async function POST(request: NextRequest) {
   console.log('[Reliability API] Request started at', new Date().toISOString())
   
   try {
+    // Check for RTSP URL in query params (for live stream simulation)
+    const url = new URL(request.url)
+    const rtspUrl = url.searchParams.get('rtsp_url')
+    
     // Check if FastAPI backend is configured
     const backendUrl = process.env.ANALYSIS_BACKEND_URL
     
@@ -114,25 +119,19 @@ export async function POST(request: NextRequest) {
             const hasFrame = !!frameToAnalyze
             
             const grokPrompt = hasFrame
-              ? `You are analyzing CCTV reliability analysis results. I'm providing you with a frame from the video that shows the critical zone and detected persons. Based on this frame and the reliability metrics:
-- Reliability Score: ${data.reliability_score}/100 (${data.reliability_label})
-- Maximum Occlusion: ${data.signals.occlusion_pct_max}%
-- Average Occlusion: ${data.signals.occlusion_pct_avg}%
-- Maximum Dwell Time: ${data.signals.dwell_s_max}s
-- Early Alert Time: ${data.timestamps.flip_at_s}s
+              ? `Analyze this CCTV frame showing a critical zone (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
 
-Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${data.reliability_label.toLowerCase()} and specific recommendations for improvement.`
-              : `You are analyzing CCTV reliability data. Based on these metrics:
-- Reliability Score: ${data.reliability_score}/100 (${data.reliability_label})
-- Maximum Occlusion: ${data.signals.occlusion_pct_max}%
-- Average Occlusion: ${data.signals.occlusion_pct_avg}%
-- Maximum Dwell Time: ${data.signals.dwell_s_max}s
-- Early Alert Time: ${data.timestamps.flip_at_s}s
+First, explain in one sentence why this zone is unreliable (${data.reliability_label.toLowerCase()}).
 
-Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${data.reliability_label.toLowerCase()} and specific recommendations for improvement. Focus on the occlusion, dwell time, and reliability metrics.`
+Then, analyze the frame visually: Where are the blind spots? Where are people being detected? What's the camera angle? Based on what you see, provide a SPECIFIC camera placement recommendation. Examples: "Add camera at top-left corner pointing down at 45° angle" or "Install overhead camera 3 meters above the ROI center" or "Position second camera opposite side of room at eye level". Be specific about location and angle.`
+              : `CCTV reliability audit: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+
+Explain in one sentence why this zone is unreliable (${data.reliability_label.toLowerCase()}).
+
+Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the ROI at 3m height" or "Install overhead camera above the critical zone" or "Position second camera at left edge pointing right". Be specific about location and angle.`
 
             const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
-            const modelName = process.env.GROK_MODEL || 'grok-beta'
+            const modelName = process.env.GROK_MODEL || 'grok-4'
             
             const grokRequestBody: any = {
               model: modelName,
@@ -176,15 +175,32 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
               if (grokInsights) {
                 console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
                 data.grok_insights = grokInsights
-                // Optionally enhance why and action with Grok insights
-                const lines = grokInsights.split('\n').filter(l => l.trim())
-                if (lines.length > 0) {
-                  // Use Grok's explanation if it's better
-                  if (lines[0].length > 20) {
-                    data.why = lines[0]
+                // Parse Grok response - extract why (first sentence) and action (camera recommendation)
+                // Split by common separators
+                const parts = grokInsights.split(/\n+|\.\s+(?=[A-Z])/).filter(p => p.trim().length > 10)
+                
+                // First part is usually "why"
+                if (parts.length > 0) {
+                  data.why = parts[0].trim().replace(/^["']|["']$/g, '') + (parts[0].trim().match(/[.!?]$/) ? '' : '.')
+                }
+                
+                // Look for action/recommendation - usually contains camera placement keywords
+                const actionKeywords = /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge)/i
+                let actionFound = false
+                
+                for (let i = 1; i < parts.length; i++) {
+                  if (actionKeywords.test(parts[i])) {
+                    data.action = parts[i].trim().replace(/^["']|["']$/g, '') + (parts[i].trim().match(/[.!?]$/) ? '' : '.')
+                    actionFound = true
+                    break
                   }
-                  if (lines.length > 1 && lines.slice(1).join(' ').length > 10) {
-                    data.action = lines.slice(1).join(' ').trim()
+                }
+                
+                // If no action found, try to extract from remaining text
+                if (!actionFound && parts.length > 1) {
+                  const remainingText = parts.slice(1).join(' ').trim()
+                  if (remainingText.length > 20) {
+                    data.action = remainingText.replace(/^["']|["']$/g, '') + (remainingText.match(/[.!?]$/) ? '' : '.')
                   }
                 }
               } else {
@@ -200,6 +216,11 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
           }
         } else {
           console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
+        }
+        
+        // Add overlay_image_base64 if available
+        if (data.overlay_image) {
+          data.overlay_image_base64 = data.overlay_image
         }
         
         return NextResponse.json(data)
@@ -526,18 +547,14 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
           console.log('[Reliability API] Attempting Grok AI enhancement...')
           // Use metrics-based analysis for mock mode
           // (Backend mode uses actual frames - see backend response handling above)
-          const grokPrompt = `You are analyzing CCTV reliability data. Based on these metrics:
-- Reliability Score: ${reliabilityScore}/100 (${reliabilityLabel})
-- Maximum Occlusion: ${Math.round(occlusionPctMax)}%
-- Average Occlusion: ${Math.round(occlusionPctAvg)}%
-- Maximum Dwell Time: ${dwellSMax.toFixed(1)}s
-- Blur Score: ${Math.round(blurScoreAvg)}
-- Early Alert Time: ${flipAtS.toFixed(1)}s
+          const grokPrompt = `CCTV reliability audit: Occlusion avg ${Math.round(occlusionPctAvg)}%, max ${Math.round(occlusionPctMax)}%, dwell max ${dwellSMax.toFixed(1)}s, blur avg ${Math.round(blurScoreAvg)}, reliability ${reliabilityScore}/100.
 
-Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${reliabilityLabel.toLowerCase()} and specific recommendations for improvement. Focus on the occlusion, dwell time, and blur metrics.`
+Explain in one sentence why this zone is unreliable (${reliabilityLabel.toLowerCase()}).
+
+Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the ROI at 3m height" or "Install overhead camera above the critical zone" or "Position second camera at left edge pointing right". Be specific about location and angle.`
 
           const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
-          const modelName = process.env.GROK_MODEL || 'grok-beta'
+          const modelName = process.env.GROK_MODEL || 'grok-4'
           
           console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}`)
           
@@ -566,13 +583,32 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
             
             if (grokInsights) {
               console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
-              // Parse Grok response to extract why and action
-              const lines = grokInsights.split('\n').filter(l => l.trim())
-              if (lines.length > 0 && lines[0].length > 20) {
-                why = lines[0]
+              // Parse Grok response - extract why (first sentence) and action (camera recommendation)
+              const parts = grokInsights.split(/\n+|\.\s+(?=[A-Z])/).filter(p => p.trim().length > 10)
+              
+              // First part is usually "why"
+              if (parts.length > 0) {
+                why = parts[0].trim().replace(/^["']|["']$/g, '') + (parts[0].trim().match(/[.!?]$/) ? '' : '.')
               }
-              if (lines.length > 1 && lines.slice(1).join(' ').trim().length > 10) {
-                action = lines.slice(1).join(' ').trim()
+              
+              // Look for action/recommendation - usually contains camera placement keywords
+              const actionKeywords = /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge)/i
+              let actionFound = false
+              
+              for (let i = 1; i < parts.length; i++) {
+                if (actionKeywords.test(parts[i])) {
+                  action = parts[i].trim().replace(/^["']|["']$/g, '') + (parts[i].trim().match(/[.!?]$/) ? '' : '.')
+                  actionFound = true
+                  break
+                }
+              }
+              
+              // If no action found, try to extract from remaining text
+              if (!actionFound && parts.length > 1) {
+                const remainingText = parts.slice(1).join(' ').trim()
+                if (remainingText.length > 20) {
+                  action = remainingText.replace(/^["']|["']$/g, '') + (remainingText.match(/[.!?]$/) ? '' : '.')
+                }
               }
             } else {
               console.warn('[Reliability API] Grok response had no content')
@@ -593,7 +629,14 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
         why = `Single view with ${occlusionText} means this zone can't be verified independently.`
       }
       if (!action) {
-        action = 'Add overlap / reposition camera / request drone check.'
+        // More specific fallback based on occlusion level
+        if (occlusionPctMax > 60) {
+          action = 'Add second camera opposite the ROI to provide coverage overlap.'
+        } else if (occlusionPctMax > 30) {
+          action = 'Reposition camera or add overhead camera to reduce occlusion.'
+        } else {
+          action = 'Consider adding camera redundancy for critical zone coverage.'
+        }
       }
 
       // Store frame data for overlay rendering (frontend will draw)
@@ -645,6 +688,8 @@ Provide a concise, actionable analysis (2-3 sentences) explaining why this zone 
           person_boxes: f.personBoxes,
           occlusion_pct: occlusionPcts[idx] || 0,
         })),
+        // Add overlay_image_base64 (same as overlay_image for compatibility)
+        ...(overlayImage ? { overlay_image_base64: overlayImage } : {}),
       }
 
       const elapsed = Date.now() - startTime
