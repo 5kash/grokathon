@@ -56,8 +56,8 @@ def get_model():
         print("[Backend] YOLOv8n model loaded successfully!")
     return model
 
-# Default ROI (center-lower area) - [x1, y1, x2, y2] as percentage
-DEFAULT_ROI = [0.25, 0.6, 0.75, 0.95]
+# Default Region of Interest (full screen) - [x1, y1, x2, y2] as percentage
+DEFAULT_ROI = [0, 0, 1, 1]
 
 def extract_frames_ffmpeg(video_path: str, fps: float = 5) -> List[Tuple[float, np.ndarray]]:
     """
@@ -226,7 +226,7 @@ def draw_overlay(frame: np.ndarray, roi: List[float], person_boxes: List[Tuple[f
     cv2.rectangle(overlay, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 0, 255), 3)
     
     # Add ROI label with background
-    label = "CRITICAL ZONE (assumed safe)"
+    label = "REGION OF INTEREST (assumed safe)"
     font_scale = 0.7
     thickness = 2
     (text_width, text_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
@@ -621,7 +621,7 @@ async def analyze_reliability(
             elif occlusion_pct_max > 30:
                 action = "Reposition camera or add overhead camera to reduce occlusion."
             else:
-                action = "Consider adding camera redundancy for critical zone coverage."
+                action = "Consider adding camera redundancy for Region of Interest coverage."
             
             # Camera recommendation heuristic
             recommendation = None

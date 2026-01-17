@@ -1,16 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { ReliabilityResponse, GrokRequestBody } from '@/lib/types'
-import { logger } from '@/lib/logger'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60 // 60 seconds (Vercel Pro limit)
 
-// Default ROI (center-lower area) - [x1, y1, x2, y2] as percentage
-const DEFAULT_ROI: [number, number, number, number] = [0.25, 0.6, 0.75, 0.95]
+// Types
+interface ReliabilityResponse {
+  reliability_label: 'RELIABLE' | 'NOT RELIABLE'
+  reliability_score: number
+  why: string
+  action: string
+  grok_insights?: string // Optional AI-powered insights from Grok
+  signals: {
+    occlusion_pct_avg: number
+    occlusion_pct_max: number
+    dwell_s_max: number
+    blur_score_avg: number
+    redundancy: number
+  }
+  timestamps: {
+    flip_at_s: number
+    standard_ai_alert_at_s: number
+    standard_not_triggered?: boolean
+  }
+  debug: {
+    sampled_frames: number
+    fps_used: number
+    roi: [number, number, number, number]
+    roi_source?: 'AUTO' | 'USER' // Whether ROI was auto-generated or user-drawn
+  }
+  overlay_image?: string // base64 PNG with ROI + boxes drawn
+  overlay_image_base64?: string // Alternative field name for overlay image
+  alert_frame?: string // base64 PNG of frame at flip_at_s
+  frame_data?: {
+    // Frame at flip_at_s for thumbnail
+    timestamp: number
+    person_boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>
+  }
+  all_frames?: Array<{
+    // All frames with person boxes for overlay
+    timestamp: number
+    person_boxes: Array<{ x1: number; y1: number; x2: number; y2: number }>
+    occlusion_pct: number
+  }>
+}
+
+// Default Region of Interest (full screen) - [x1, y1, x2, y2] as percentage
+const DEFAULT_ROI: [number, number, number, number] = [0, 0, 1, 1]
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now()
-  logger.log('[Reliability API] Request started at', new Date().toISOString())
+  console.log('[Reliability API] Request started at', new Date().toISOString())
   
   try {
     // Check for RTSP URL in query params (for live stream simulation)
@@ -22,7 +61,7 @@ export async function POST(request: NextRequest) {
     
     if (backendUrl) {
       // Proxy to FastAPI backend for real YOLO analysis
-      logger.log(`[Reliability API] Proxying to backend: ${backendUrl}`)
+      console.log(`[Reliability API] Proxying to backend: ${backendUrl}`)
       
       try {
         const formData = await request.formData()
@@ -57,7 +96,7 @@ export async function POST(request: NextRequest) {
         
         if (!backendResponse.ok) {
           const errorData = await backendResponse.text()
-          logger.error('[Reliability API] Backend error:', errorData)
+          console.error('[Reliability API] Backend error:', errorData)
           return NextResponse.json(
             { error: `Backend analysis failed: ${errorData}` },
             { status: backendResponse.status }
@@ -66,10 +105,10 @@ export async function POST(request: NextRequest) {
         
         const data = await backendResponse.json()
         const elapsed = Date.now() - startTime
-        logger.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
-        logger.log('[Reliability API] Backend response keys:', Object.keys(data))
-        logger.log('[Reliability API] Has overlay_image:', !!data.overlay_image)
-        logger.log('[Reliability API] Has alert_frame:', !!data.alert_frame)
+        console.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
+        console.log('[Reliability API] Backend response keys:', Object.keys(data))
+        console.log('[Reliability API] Has overlay_image:', !!data.overlay_image)
+        console.log('[Reliability API] Has alert_frame:', !!data.alert_frame)
         
         // Track ROI source (USER if ROI was provided, AUTO otherwise)
         if (!data.debug) {
@@ -83,7 +122,7 @@ export async function POST(request: NextRequest) {
         const grokApiKey = process.env.GROK_API_KEY
         if (grokApiKey) {
           try {
-            logger.log('[Reliability API] Attempting Grok AI enhancement with backend data...')
+            console.log('[Reliability API] Attempting Grok AI enhancement with backend data...')
             
             // Use alert_frame if available (most relevant), otherwise overlay_image, otherwise metrics-only
             const frameToAnalyze = data.alert_frame || data.overlay_image
@@ -91,12 +130,12 @@ export async function POST(request: NextRequest) {
             
             const grokPrompt = hasFrame
               ? data.reliability_label === 'RELIABLE'
-                ? `Analyze this CCTV frame showing a critical zone (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+                ? `Analyze this CCTV frame showing a Region of Interest (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
 
 This zone is RELIABLE. Explain in one sentence why the coverage is adequate and trustworthy based on what you see in the frame.
 
 Then provide maintenance recommendations. Examples: "Continue monitoring with current setup" or "Consider periodic calibration checks" or "Maintain current camera positioning".`
-                : `Analyze this CCTV frame showing a critical zone (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
+                : `Analyze this CCTV frame showing a Region of Interest (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg ${data.signals.occlusion_pct_avg}%, max ${data.signals.occlusion_pct_max}%, dwell max ${data.signals.dwell_s_max}s, blur avg ${data.signals.blur_score_avg}, reliability ${data.reliability_score}/100.
 
 This zone is NOT RELIABLE. First, explain in one sentence why this zone is unreliable.
 
@@ -111,12 +150,12 @@ Then provide maintenance recommendations. Examples: "Continue monitoring with cu
 
 This zone is NOT RELIABLE. Explain in one sentence why this zone is unreliable.
 
-Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the ROI at 3m height" or "Install overhead camera above the critical zone" or "Position second camera at left edge pointing right". Be specific about location and angle.`
+Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the Region of Interest at 3m height" or "Install overhead camera above the Region of Interest" or "Position second camera at left edge pointing right". Be specific about location and angle.`
 
             const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
             const modelName = process.env.GROK_MODEL || 'grok-4'
             
-            const grokRequestBody: GrokRequestBody = {
+            const grokRequestBody: any = {
               model: modelName,
               messages: [
                 {
@@ -137,11 +176,11 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
                     : grokPrompt,
                 },
               ],
-              max_tokens: 400,
+              max_tokens: 800, // Increased for more detailed analysis
               temperature: 0.7,
             }
             
-            logger.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}, hasFrame: ${hasFrame}`)
+            console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}, hasFrame: ${hasFrame}`)
             
             const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
               method: 'POST',
@@ -156,52 +195,102 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
               const grokData = await grokResponse.json()
               const grokInsights = grokData.choices?.[0]?.message?.content || null
               if (grokInsights) {
-                logger.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
+                console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
                 data.grok_insights = grokInsights
-                // Parse Grok response - extract why (first sentence) and action (camera recommendation)
-                // Split by common separators
-                const parts = grokInsights.split(/\n+|\.\s+(?=[A-Z])/).filter(p => p.trim().length > 10)
+                // Parse Grok response - extract detailed why and action
+                // Try to find "why" section (first paragraph or sentences explaining the reliability)
+                // Try to find "action" section (recommendations)
                 
-                // First part is usually "why"
-                if (parts.length > 0) {
-                  data.why = parts[0].trim().replace(/^["']|["']$/g, '') + (parts[0].trim().match(/[.!?]$/) ? '' : '.')
-                }
+                // Split by double newlines (paragraphs) or single newlines
+                const paragraphs = grokInsights.split(/\n\s*\n/).filter(p => p.trim().length > 10)
+                const lines = grokInsights.split(/\n/).filter(l => l.trim().length > 10)
                 
-                // For NOT RELIABLE: Look for camera placement keywords
-                // For RELIABLE: Look for maintenance keywords
-                const actionKeywords = data.reliability_label === 'RELIABLE'
-                  ? /(?:continue|monitor|maintain|calibration|periodic|setup|current)/i
-                  : /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge)/i
-                let actionFound = false
-                
-                for (let i = 1; i < parts.length; i++) {
-                  if (actionKeywords.test(parts[i])) {
-                    data.action = parts[i].trim().replace(/^["']|["']$/g, '') + (parts[i].trim().match(/[.!?]$/) ? '' : '.')
-                    actionFound = true
-                    break
+                // Look for "why" - usually first 1-2 sentences or first paragraph
+                // For RELIABLE: explanation of why coverage is adequate
+                // For NOT RELIABLE: explanation of why it's unreliable
+                if (paragraphs.length > 0) {
+                  // Use first paragraph as "why" (more detailed)
+                  const firstPara = paragraphs[0].trim()
+                  // Remove quotes if present
+                  data.why = firstPara.replace(/^["']|["']$/g, '').replace(/\n/g, ' ').trim()
+                  if (!data.why.match(/[.!?]$/)) {
+                    data.why += '.'
+                  }
+                } else if (lines.length > 0) {
+                  // Use first 2-3 sentences from first line
+                  const firstLine = lines[0].trim()
+                  const sentences = firstLine.match(/[^.!?]+[.!?]+/g) || []
+                  if (sentences.length > 0) {
+                    // Take first 2 sentences for more detail
+                    data.why = sentences.slice(0, 2).join(' ').trim().replace(/^["']|["']$/g, '')
+                  } else {
+                    data.why = firstLine.replace(/^["']|["']$/g, '')
                   }
                 }
                 
-                // If no action found, try to extract from remaining text
-                if (!actionFound && parts.length > 1) {
-                  const remainingText = parts.slice(1).join(' ').trim()
+                // Look for "action" - usually contains keywords like "add", "install", "recommend", etc.
+                const actionKeywords = data.reliability_label === 'RELIABLE'
+                  ? /(?:continue|monitor|maintain|calibration|periodic|setup|current|recommend|suggest)/i
+                  : /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge|should|consider)/i
+                
+                let actionFound = false
+                
+                // Try to find action in paragraphs (usually second paragraph)
+                if (paragraphs.length > 1) {
+                  for (let i = 1; i < paragraphs.length; i++) {
+                    if (actionKeywords.test(paragraphs[i])) {
+                      data.action = paragraphs[i].trim().replace(/^["']|["']$/g, '').replace(/\n/g, ' ').trim()
+                      if (!data.action.match(/[.!?]$/)) {
+                        data.action += '.'
+                      }
+                      actionFound = true
+                      break
+                    }
+                  }
+                }
+                
+                // If not found in paragraphs, search in lines
+                if (!actionFound && lines.length > 1) {
+                  for (let i = 1; i < lines.length; i++) {
+                    if (actionKeywords.test(lines[i])) {
+                      // Take this line and potentially next line for more detail
+                      const actionLines = [lines[i]]
+                      if (i + 1 < lines.length && lines[i + 1].trim().length > 20) {
+                        actionLines.push(lines[i + 1])
+                      }
+                      data.action = actionLines.join(' ').trim().replace(/^["']|["']$/g, '')
+                      if (!data.action.match(/[.!?]$/)) {
+                        data.action += '.'
+                      }
+                      actionFound = true
+                      break
+                    }
+                  }
+                }
+                
+                // Fallback: use remaining text after "why"
+                if (!actionFound && paragraphs.length > 1) {
+                  const remainingText = paragraphs.slice(1).join(' ').trim()
                   if (remainingText.length > 20) {
-                    data.action = remainingText.replace(/^["']|["']$/g, '') + (remainingText.match(/[.!?]$/) ? '' : '.')
+                    data.action = remainingText.replace(/^["']|["']$/g, '').replace(/\n/g, ' ').trim()
+                    if (!data.action.match(/[.!?]$/)) {
+                      data.action += '.'
+                    }
                   }
                 }
               } else {
-                logger.warn('[Reliability API] Grok response had no content')
+                console.warn('[Reliability API] Grok response had no content')
               }
             } else {
               const errorText = await grokResponse.text()
-              logger.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
+              console.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
             }
           } catch (grokError) {
-            logger.error('[Reliability API] Grok enhancement failed:', grokError)
+            console.error('[Reliability API] Grok enhancement failed:', grokError)
             // Continue without Grok enhancement
           }
         } else {
-          logger.log('[Reliability API] Grok API key not found, skipping AI enhancement')
+          console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
         }
         
         // Add overlay_image_base64 if available
@@ -216,13 +305,13 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
         
         return NextResponse.json(data)
       } catch (proxyError) {
-        logger.warn('[Reliability API] Backend connection failed, falling back to mock processing:', proxyError)
+        console.warn('[Reliability API] Backend connection failed, falling back to mock processing:', proxyError)
         // Fall through to mock processing instead of erroring
       }
     }
     
     // Fallback to mock processing (backend not configured or connection failed)
-    logger.log('[Reliability API] Using mock processing (backend not available)')
+    console.log('[Reliability API] Using mock processing (backend not available)')
     
     // For mock processing, we don't need the actual file content
     // Just get metadata to avoid Vercel's file buffering delay
@@ -246,7 +335,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
         
         if (videoFile) {
           fileSize = videoFile.size
-          logger.log('[Reliability API] Got file metadata:', videoFile.name, fileSize, 'bytes')
+          console.log('[Reliability API] Got file metadata:', videoFile.name, fileSize, 'bytes')
         }
         
         // Get parameters
@@ -262,12 +351,12 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
               roiSource = 'USER' // User-drawn ROI
             }
           } catch (e) {
-            logger.warn('[Reliability API] Invalid ROI format, using default')
+            console.warn('[Reliability API] Invalid ROI format, using default')
           }
         }
     } catch (formError) {
       // If formData parsing fails/times out, use default values for mock processing
-      logger.warn('[Reliability API] FormData parsing issue, using defaults:', formError)
+      console.warn('[Reliability API] FormData parsing issue, using defaults:', formError)
       fileSize = 10 * 1024 * 1024 // Default 10MB for mock
     }
     
@@ -290,8 +379,8 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
     // This avoids memory issues on Vercel
     // For Vercel Hobby (10s timeout), we need to return quickly
 
-    logger.log(`[Reliability API] Parameters - fps: ${fps}, roi: ${roi}, fileSize: ${fileSize}`)
-    logger.log('[Reliability API] Starting mock processing (no file I/O)...')
+    console.log(`[Reliability API] Parameters - fps: ${fps}, roi: ${roi}, fileSize: ${fileSize}`)
+    console.log('[Reliability API] Starting mock processing (no file I/O)...')
 
     // TODO: For full implementation, use:
     // - ffmpeg-python or fluent-ffmpeg to extract frames
@@ -312,7 +401,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
       const videoDuration = estimatedDuration
       const sampledFrames = Math.ceil(videoDuration * fps)
       
-      logger.log(`[Reliability API] Estimated duration: ${videoDuration}s, frames: ${sampledFrames}`)
+      console.log(`[Reliability API] Estimated duration: ${videoDuration}s, frames: ${sampledFrames}`)
       
       // Mock person detection results per frame
       // Store frames with person boxes for overlay rendering
@@ -544,7 +633,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
       const grokApiKey = process.env.GROK_API_KEY
       if (grokApiKey) {
         try {
-          logger.log('[Reliability API] Attempting Grok AI enhancement...')
+          console.log('[Reliability API] Attempting Grok AI enhancement...')
           // Use metrics-based analysis for mock mode
           // (Backend mode uses actual frames - see backend response handling above)
           const grokPrompt = reliabilityLabel === 'RELIABLE'
@@ -557,12 +646,12 @@ Then provide maintenance recommendations. Examples: "Continue monitoring with cu
 
 This zone is NOT RELIABLE. Explain in one sentence why this zone is unreliable.
 
-Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the ROI at 3m height" or "Install overhead camera above the critical zone" or "Position second camera at left edge pointing right". Be specific about location and angle.`
+Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the Region of Interest at 3m height" or "Install overhead camera above the Region of Interest" or "Position second camera at left edge pointing right". Be specific about location and angle.`
 
           const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
           const modelName = process.env.GROK_MODEL || 'grok-4'
           
-          logger.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}`)
+          console.log(`[Reliability API] Calling Grok API: ${grokApiUrl} with model: ${modelName}`)
           
           const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
             method: 'POST',
@@ -578,7 +667,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
                   content: grokPrompt,
                 },
               ],
-              max_tokens: 400,
+              max_tokens: 800, // Increased for more detailed analysis
               temperature: 0.7,
             }),
           })
@@ -588,46 +677,86 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
             grokInsights = grokData.choices?.[0]?.message?.content || null
             
             if (grokInsights) {
-              logger.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
-              // Parse Grok response - extract why (first sentence) and action (camera recommendation)
-              const parts = grokInsights.split(/\n+|\.\s+(?=[A-Z])/).filter(p => p.trim().length > 10)
+              console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
+              // Parse Grok response - extract detailed why and action (same logic as backend mode)
+              const paragraphs = grokInsights.split(/\n\s*\n/).filter(p => p.trim().length > 10)
+              const lines = grokInsights.split(/\n/).filter(l => l.trim().length > 10)
               
-              // First part is usually "why"
-              if (parts.length > 0) {
-                why = parts[0].trim().replace(/^["']|["']$/g, '') + (parts[0].trim().match(/[.!?]$/) ? '' : '.')
-              }
-              
-              // Look for action/recommendation - usually contains camera placement keywords
-              const actionKeywords = /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge)/i
-              let actionFound = false
-              
-              for (let i = 1; i < parts.length; i++) {
-                if (actionKeywords.test(parts[i])) {
-                  action = parts[i].trim().replace(/^["']|["']$/g, '') + (parts[i].trim().match(/[.!?]$/) ? '' : '.')
-                  actionFound = true
-                  break
+              // Extract "why" - first paragraph or first 2 sentences
+              if (paragraphs.length > 0) {
+                const firstPara = paragraphs[0].trim()
+                why = firstPara.replace(/^["']|["']$/g, '').replace(/\n/g, ' ').trim()
+                if (!why.match(/[.!?]$/)) {
+                  why += '.'
+                }
+              } else if (lines.length > 0) {
+                const firstLine = lines[0].trim()
+                const sentences = firstLine.match(/[^.!?]+[.!?]+/g) || []
+                if (sentences.length > 0) {
+                  why = sentences.slice(0, 2).join(' ').trim().replace(/^["']|["']$/g, '')
+                } else {
+                  why = firstLine.replace(/^["']|["']$/g, '')
                 }
               }
               
-              // If no action found, try to extract from remaining text
-              if (!actionFound && parts.length > 1) {
-                const remainingText = parts.slice(1).join(' ').trim()
+              // Extract "action" - look for recommendation keywords
+              const actionKeywords = reliabilityLabel === 'RELIABLE'
+                ? /(?:continue|monitor|maintain|calibration|periodic|setup|current|recommend|suggest)/i
+                : /(?:add|install|position|place|recommend|suggest|camera|overhead|opposite|angle|height|corner|edge|should|consider)/i
+              
+              let actionFound = false
+              
+              if (paragraphs.length > 1) {
+                for (let i = 1; i < paragraphs.length; i++) {
+                  if (actionKeywords.test(paragraphs[i])) {
+                    action = paragraphs[i].trim().replace(/^["']|["']$/g, '').replace(/\n/g, ' ').trim()
+                    if (!action.match(/[.!?]$/)) {
+                      action += '.'
+                    }
+                    actionFound = true
+                    break
+                  }
+                }
+              }
+              
+              if (!actionFound && lines.length > 1) {
+                for (let i = 1; i < lines.length; i++) {
+                  if (actionKeywords.test(lines[i])) {
+                    const actionLines = [lines[i]]
+                    if (i + 1 < lines.length && lines[i + 1].trim().length > 20) {
+                      actionLines.push(lines[i + 1])
+                    }
+                    action = actionLines.join(' ').trim().replace(/^["']|["']$/g, '')
+                    if (!action.match(/[.!?]$/)) {
+                      action += '.'
+                    }
+                    actionFound = true
+                    break
+                  }
+                }
+              }
+              
+              if (!actionFound && paragraphs.length > 1) {
+                const remainingText = paragraphs.slice(1).join(' ').trim()
                 if (remainingText.length > 20) {
-                  action = remainingText.replace(/^["']|["']$/g, '') + (remainingText.match(/[.!?]$/) ? '' : '.')
+                  action = remainingText.replace(/^["']|["']$/g, '').replace(/\n/g, ' ').trim()
+                  if (!action.match(/[.!?]$/)) {
+                    action += '.'
+                  }
                 }
               }
             } else {
-              logger.warn('[Reliability API] Grok response had no content')
+              console.warn('[Reliability API] Grok response had no content')
             }
           } else {
             const errorText = await grokResponse.text()
-            logger.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
+            console.error('[Reliability API] Grok API error:', grokResponse.status, errorText)
           }
         } catch (grokError) {
-          logger.error('[Reliability API] Grok enhancement failed:', grokError)
+          console.error('[Reliability API] Grok enhancement failed:', grokError)
         }
       } else {
-        logger.log('[Reliability API] Grok API key not found, skipping AI enhancement')
+        console.log('[Reliability API] Grok API key not found, skipping AI enhancement')
       }
       
       // Fallback to templated response if Grok not available or failed
@@ -648,7 +777,7 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
           } else if (occlusionPctMax > 30) {
             action = 'Reposition camera or add overhead camera to reduce occlusion.'
           } else {
-            action = 'Consider adding camera redundancy for critical zone coverage.'
+            action = 'Consider adding camera redundancy for Region of Interest coverage.'
           }
         }
       }
@@ -708,21 +837,21 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
       }
 
       const elapsed = Date.now() - startTime
-      logger.log(`[Reliability API] Processing completed in ${elapsed}ms`)
-      logger.log(`[Reliability API] Response: ${JSON.stringify({ reliability_label: reliabilityLabel, reliability_score: reliabilityScore })}`)
+      console.log(`[Reliability API] Processing completed in ${elapsed}ms`)
+      console.log(`[Reliability API] Response: ${JSON.stringify({ reliability_label: reliabilityLabel, reliability_score: reliabilityScore })}`)
       
       // Ensure response is sent immediately
       const jsonResponse = NextResponse.json(response)
       jsonResponse.headers.set('Cache-Control', 'no-cache')
       return jsonResponse
     } catch (processingError) {
-      logger.error('[Reliability API] Processing error:', processingError)
+      console.error('[Reliability API] Processing error:', processingError)
       throw processingError
     }
   } catch (error) {
     const elapsed = Date.now() - startTime
-    logger.error(`[Reliability API] Error after ${elapsed}ms:`, error)
-    logger.error('[Reliability API] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
+    console.error(`[Reliability API] Error after ${elapsed}ms:`, error)
+    console.error('[Reliability API] Error stack:', error instanceof Error ? error.stack : 'No stack trace')
     
     return NextResponse.json(
       {

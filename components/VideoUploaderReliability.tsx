@@ -51,10 +51,10 @@ export default function VideoUploaderReliability({
         return
       }
       
-      setSelectedFile(file)
-      const url = URL.createObjectURL(file)
-      setPreviewUrl(url)
-      onVideoUrlChange?.(url)
+        setSelectedFile(file)
+        const url = URL.createObjectURL(file)
+        setPreviewUrl(url)
+        onVideoUrlChange?.(url)
       setRoiPoints([]) // Reset ROI when new file selected
     }
   }
@@ -158,12 +158,9 @@ export default function VideoUploaderReliability({
       // Always use Next.js API route (mock processing) - works without backend
       // Backend is optional and only used if explicitly configured AND available
       const endpoint = '/api/analyze-reliability'
+      console.log(`[Frontend] Using Next.js API route: ${endpoint}`)
       
-      // Only log in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`[Frontend] Using Next.js API route: ${endpoint}`)
-        console.log(`[Frontend] Calling ${endpoint} with file: ${selectedFile.name} (${selectedFile.size} bytes) at`, new Date().toISOString())
-      }
+      console.log(`[Frontend] Calling ${endpoint} with file: ${selectedFile.name} (${selectedFile.size} bytes) at`, new Date().toISOString())
       
       // Add timeout (65 seconds for Vercel)
       const timeout = 65000
@@ -177,9 +174,7 @@ export default function VideoUploaderReliability({
           body: formData,
           signal: controller.signal,
         })
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`[Frontend] Response received in ${Date.now() - requestStart}ms, status: ${response.status}`)
-        }
+        console.log(`[Frontend] Response received in ${Date.now() - requestStart}ms, status: ${response.status}`)
       } catch (fetchError) {
         console.error('[Frontend] Fetch error:', fetchError)
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
@@ -302,7 +297,7 @@ export default function VideoUploaderReliability({
               className="rounded"
             />
             <Label htmlFor="roi-draw-toggle" className="text-white text-sm cursor-pointer">
-              Draw ROI (4 points) - Optional
+              Draw Region of Interest (4 points) - Optional
             </Label>
             {roiPoints.length > 0 && (
               <Button
@@ -355,36 +350,36 @@ export default function VideoUploaderReliability({
                   </button>
                 </div>
               ) : (
-                <div className="relative">
-                  <video
-                    ref={actualVideoRef}
-                    src={previewUrl}
-                    controls
-                    autoPlay
-                    muted
-                    loop
-                    className="w-full rounded-lg"
-                    style={{ maxHeight: '400px' }}
+            <div className="relative">
+              <video
+                ref={actualVideoRef}
+                src={previewUrl}
+                controls
+                autoPlay
+                muted
+                loop
+                className="w-full rounded-lg"
+                style={{ maxHeight: '400px' }}
+              />
+              <button
+                onClick={handleClear}
+                className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600"
+                disabled={isAnalyzing}
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
                   />
-                  <button
-                    onClick={handleClear}
-                    className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-2 hover:bg-red-600"
-                    disabled={isAnalyzing}
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
+                </svg>
+              </button>
                 </div>
               )}
             </div>

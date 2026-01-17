@@ -134,6 +134,11 @@ export default function ReliabilityResults({
     // Find nearest frame
     const frame = findNearestFrame(video.currentTime)
     if (!frame) return
+    
+    // Debug: Log person boxes if available (only log occasionally to avoid spam)
+    if (frame.person_boxes && frame.person_boxes.length > 0 && Math.random() < 0.1) {
+      console.log(`[ReliabilityResults] Drawing ${frame.person_boxes.length} person boxes at time ${video.currentTime.toFixed(2)}s`, frame.person_boxes[0])
+    }
 
     const roi = data.debug.roi
     const w = canvas.width
@@ -151,28 +156,85 @@ export default function ReliabilityResults({
     ctx.lineWidth = 3
     ctx.strokeRect(roiX1, roiY1, roiWidth, roiHeight)
 
-    // Draw ROI label background with source indicator
+    // Draw Region of Interest label background with source indicator
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
     const roiSource = data.debug.roi_source || 'AUTO'
-    const labelText = `CRITICAL ZONE (${roiSource})`
+    const labelText = `REGION OF INTEREST (${roiSource})`
     ctx.font = 'bold 14px sans-serif'
     const labelMetrics = ctx.measureText(labelText)
     const labelHeight = 20
-    const labelY = Math.max(roiY1 - 10, labelHeight + 10)
-    ctx.fillRect(roiX1, labelY - labelHeight - 5, labelMetrics.width + 10, labelHeight + 10)
+    const labelPadding = 10
+    
+    // Check if ROI is full screen (covers entire frame) - use tolerance for floating point comparison
+    const tolerance = 0.01
+    const isFullScreen = Math.abs(roi[0]) < tolerance && 
+                         Math.abs(roi[1]) < tolerance && 
+                         Math.abs(roi[2] - 1) < tolerance && 
+                         Math.abs(roi[3] - 1) < tolerance
+    
+    // Position label: top center if full screen, top-left of ROI otherwise
+    let labelX: number
+    let labelY: number
+    
+    if (isFullScreen) {
+      // Center the label at the top of the frame - always at top
+      labelX = (w - labelMetrics.width) / 2
+      labelY = 25 // Fixed position at top of frame (25px from top edge)
+    } else {
+      // Position at top-left of ROI
+      labelY = Math.max(roiY1 - labelPadding, labelHeight + labelPadding)
+      labelX = roiX1 + 5
+    }
+    
+    // Draw label background (ensure it's drawn at the correct position)
+    const bgY = labelY - labelHeight - 5
+    ctx.fillRect(labelX - 5, bgY, labelMetrics.width + 10, labelHeight + 10)
     ctx.fillStyle = roiSource === 'USER' ? '#4ade80' : '#ef4444' // Green for USER, red for AUTO
-    ctx.fillText(labelText, roiX1 + 5, labelY)
+    ctx.fillText(labelText, labelX, labelY)
 
-    // Draw person boxes (green)
-    ctx.strokeStyle = '#4ade80' // green-400
-    ctx.lineWidth = 2
-    frame.person_boxes.forEach((box) => {
-      const x1 = box.x1 * w
-      const y1 = box.y1 * h
-      const x2 = box.x2 * w
-      const y2 = box.y2 * h
-      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1)
-    })
+    // Draw person boxes (green) - make them more visible
+    if (frame.person_boxes && frame.person_boxes.length > 0) {
+      ctx.strokeStyle = '#4ade80' // green-400
+      ctx.lineWidth = 3 // Increased from 2 to 3 for better visibility
+      frame.person_boxes.forEach((box, idx) => {
+        // Handle both tuple format [x1, y1, x2, y2] and object format {x1, y1, x2, y2}
+        let x1: number, y1: number, x2: number, y2: number
+        if (Array.isArray(box)) {
+          // Tuple format from backend: [x1, y1, x2, y2]
+          [x1, y1, x2, y2] = box
+        } else {
+          // Object format: {x1, y1, x2, y2}
+          x1 = box.x1
+          y1 = box.y1
+          x2 = box.x2
+          y2 = box.y2
+        }
+        
+        // Convert normalized coordinates (0-1) to pixel coordinates
+        const px1 = x1 * w
+        const py1 = y1 * h
+        const px2 = x2 * w
+        const py2 = y2 * h
+        const boxWidth = px2 - px1
+        const boxHeight = py2 - py1
+        
+        // Draw box outline
+        ctx.strokeRect(px1, py1, boxWidth, boxHeight)
+        
+        // Add semi-transparent fill for better visibility
+        ctx.fillStyle = 'rgba(74, 222, 128, 0.1)' // green-400 with 10% opacity
+        ctx.fillRect(px1, py1, boxWidth, boxHeight)
+        
+        // Draw label "Person X" at top-left of box
+        ctx.fillStyle = '#4ade80'
+        ctx.font = 'bold 12px sans-serif'
+        const labelText = `Person ${idx + 1}`
+        const labelMetrics = ctx.measureText(labelText)
+        ctx.fillRect(px1, py1 - 16, labelMetrics.width + 4, 16)
+        ctx.fillStyle = '#000000'
+        ctx.fillText(labelText, px1 + 2, py1 - 4)
+      })
+    }
 
     // Draw occlusion shading (semi-transparent red overlay within ROI, clipped by occlusion percentage)
     if (frame.occlusion_pct > 0) {
@@ -374,7 +436,7 @@ export default function ReliabilityResults({
           <div className="relative max-w-7xl max-h-full">
             <img
               src={`data:image/png;base64,${data.overlay_image || data.overlay_image_base64}`}
-              alt="ROI Overlay Fullscreen"
+                          alt="Region of Interest Overlay Fullscreen"
               className="max-w-full max-h-[90vh] object-contain"
             />
             <button
@@ -412,8 +474,8 @@ export default function ReliabilityResults({
               <CardContent>
                 <div className="space-y-4">
                   {/* Compact Score Gauge */}
-                  <div className="text-center relative">
-                    <div className="w-full mx-auto">
+                  <div className="text-center relative" style={{ height: '150px', overflow: 'hidden' }}>
+                    <div className="w-full mx-auto relative" style={{ height: '150px' }}>
                       <ResponsiveContainer width="100%" height={150}>
                         <PieChart>
                           <Pie
@@ -435,11 +497,11 @@ export default function ReliabilityResults({
                           </Pie>
                         </PieChart>
                       </ResponsiveContainer>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none" style={{ marginTop: '-150px', height: '150px' }}>
-                        <div className={`font-bold text-3xl ${scoreColor} mb-1`}>
+                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                        <div className={`font-bold text-xl ${scoreColor} mb-0.5 leading-tight`}>
                           {Math.max(0, Math.min(100, data.reliability_score))}
                         </div>
-                        <div className={`font-bold text-sm ${scoreColor}`}>
+                        <div className={`font-bold text-[10px] ${scoreColor} px-1 text-center leading-tight max-w-full truncate`}>
                           {data.reliability_label}
                         </div>
                       </div>
@@ -448,19 +510,31 @@ export default function ReliabilityResults({
                   
                   {/* Alert Times (Compact) */}
                   <div className="space-y-2 pt-2 border-t border-gray-800">
-                    <div className="flex items-center justify-between p-2 bg-green-500/10 border border-green-500/30 rounded">
+                    <div 
+                      className="flex items-center justify-between p-2 bg-green-500/10 border border-green-500/30 rounded cursor-help"
+                      title="XUUG Early Alert: Triggers when occlusion >30% for 0.5s OR dwell time ≥2s. Faster detection than standard systems."
+                    >
                       <div className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-green-400" />
-                        <span className="text-xs text-gray-300">Early Alert:</span>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-300">Early Alert</span>
+                          <span className="text-[10px] text-gray-500">XUUG System</span>
+                        </div>
                       </div>
                       <span className="text-green-400 font-bold text-xs">
                         {hasEarlyAlert ? `${data.timestamps.flip_at_s.toFixed(1)}s` : (isReliable ? 'No breach' : 'N/A')}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between p-2 bg-orange-500/10 border border-orange-500/30 rounded">
+                    <div 
+                      className="flex items-center justify-between p-2 bg-orange-500/10 border border-orange-500/30 rounded cursor-help"
+                      title="Standard AI Alert: Traditional systems trigger when occlusion >60% for 2s OR dwell time ≥4s. Slower than XUUG."
+                    >
                       <div className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-orange-400" />
-                        <span className="text-xs text-gray-300">Standard:</span>
+                        <div className="flex flex-col">
+                          <span className="text-xs text-gray-300">Standard</span>
+                          <span className="text-[10px] text-gray-500">Traditional AI</span>
+                        </div>
                       </div>
                       <span className="text-orange-400 font-bold text-xs">
                         {data.timestamps.standard_not_triggered 
@@ -471,8 +545,11 @@ export default function ReliabilityResults({
                       </span>
                     </div>
                     {alertDifference && parseFloat(alertDifference) > 0 && (
-                      <div className="text-xs text-green-400 text-center pt-1">
-                        ⚡ {alertDifference}s faster
+                      <div 
+                        className="text-xs text-green-400 text-center pt-1 font-semibold bg-green-500/10 rounded p-1.5 border border-green-500/30"
+                        title={`XUUG detects issues ${alertDifference} seconds faster than standard AI systems`}
+                      >
+                        ⚡ {alertDifference}s faster detection
                       </div>
                     )}
                   </div>
@@ -527,7 +604,7 @@ export default function ReliabilityResults({
                       <div className="relative group cursor-pointer" onClick={() => setOverlayZoomed(true)}>
                         <img
                           src={`data:image/png;base64,${data.overlay_image || data.overlay_image_base64}`}
-                          alt="ROI Overlay with Person Boxes"
+                          alt="Region of Interest Overlay with Person Boxes"
                           className="w-full transition-transform group-hover:scale-105"
                         />
                         <div className="absolute top-2 right-2 bg-black/50 rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -588,21 +665,18 @@ export default function ReliabilityResults({
             <div className="grid md:grid-cols-2 gap-6">
               {/* Left: Why & Action */}
               <div className="space-y-4">
-                {/* Why (one sentence max, styled as quote) */}
+                {/* Why (expanded, styled as quote) */}
                 <div className="border-l-4 border-gray-600 pl-4 py-2">
                   <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Why</h4>
-                  <p className="text-white text-sm italic">
-                    "{(() => {
-                      const firstSentenceMatch = data.why.match(/^[^.!?]+[.!?]/)
-                      return firstSentenceMatch ? firstSentenceMatch[0].trim() : data.why.split(/[.!?]/)[0] + '.'
-                    })()}"
+                  <p className="text-white text-sm leading-relaxed">
+                    "{data.why}"
                   </p>
                 </div>
                 
-                {/* Recommended Action (styled as quote) */}
+                {/* Recommended Action (expanded, styled as quote) */}
                 <div className="border-l-4 border-gray-600 pl-4 py-2">
                   <h4 className="text-gray-400 text-xs mb-2 uppercase tracking-wide">Action</h4>
-                  <p className="text-white font-medium italic">"{data.action}"</p>
+                  <p className="text-white text-sm leading-relaxed font-medium">"{data.action}"</p>
                 </div>
                 
                 {/* Share Report Button */}
