@@ -3,13 +3,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, XCircle, AlertTriangle, Eye, Shield, Clock } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertTriangle, Eye, Shield, Clock, Sparkles } from 'lucide-react'
 
 interface ReliabilityData {
   reliability_label: 'RELIABLE' | 'NOT RELIABLE'
   reliability_score: number
   why: string
   action: string
+  grok_insights?: string // AI-powered insights from Grok
   signals: {
     occlusion_pct_avg: number
     occlusion_pct_max: number
@@ -289,6 +290,12 @@ export default function ReliabilityResults({
               <XCircle className="w-6 h-6 text-red-400" />
             )}
             Reliability Status
+            {data.grok_insights && (
+              <span className="ml-auto flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full border border-purple-500/30 animate-pulse">
+                <Sparkles className="w-3 h-3" />
+                AI
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -565,10 +572,27 @@ export default function ReliabilityResults({
           <CardTitle className="text-white flex items-center gap-2">
             <Shield className="w-5 h-5" />
             Recommendations
+            {data.grok_insights && (
+              <span className="ml-auto flex items-center gap-1 text-xs text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full border border-purple-500/30">
+                <Sparkles className="w-3 h-3" />
+                AI Enhanced
+              </span>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {/* Grok AI Insights Section */}
+            {data.grok_insights && (
+              <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/30 rounded-lg p-4 space-y-2">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <h4 className="text-purple-400 text-sm font-semibold">Grok AI Analysis</h4>
+                </div>
+                <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{data.grok_insights}</p>
+              </div>
+            )}
+            
             {/* Only show action here - no duplicate "why" */}
             <div>
               <h4 className="text-gray-400 text-sm mb-2">Recommended Action:</h4>

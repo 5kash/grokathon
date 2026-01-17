@@ -9,6 +9,7 @@ interface ReliabilityResponse {
   reliability_score: number
   why: string
   action: string
+  grok_insights?: string // Optional AI-powered insights from Grok
   signals: {
     occlusion_pct_avg: number
     occlusion_pct_max: number
@@ -98,6 +99,79 @@ export async function POST(request: NextRequest) {
         const data = await backendResponse.json()
         const elapsed = Date.now() - startTime
         console.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
+        
+        // Enhance with Grok AI insights if available and we have frames
+        const grokApiKey = process.env.GROK_API_KEY
+        if (grokApiKey && (data.overlay_image || data.alert_frame)) {
+          try {
+            // Use alert_frame if available (most relevant), otherwise overlay_image
+            const frameToAnalyze = data.alert_frame || data.overlay_image
+            
+            const grokPrompt = `You are analyzing CCTV reliability analysis results. I'm providing you with a frame from the video that shows the critical zone and detected persons. Based on this frame and the reliability metrics:
+- Reliability Score: ${data.reliability_score}/100 (${data.reliability_label})
+- Maximum Occlusion: ${data.signals.occlusion_pct_max}%
+- Average Occlusion: ${data.signals.occlusion_pct_avg}%
+- Maximum Dwell Time: ${data.signals.dwell_s_max}s
+- Early Alert Time: ${data.timestamps.flip_at_s}s
+
+Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${data.reliability_label.toLowerCase()} and specific recommendations for improvement.`
+
+            const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
+            const modelName = process.env.GROK_MODEL || 'grok-beta'
+            
+            const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${grokApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: modelName,
+                messages: [
+                  {
+                    role: 'user',
+                    content: [
+                      {
+                        type: 'text',
+                        text: grokPrompt,
+                      },
+                      {
+                        type: 'image_url',
+                        image_url: {
+                          url: `data:image/png;base64,${frameToAnalyze}`,
+                        },
+                      },
+                    ],
+                  },
+                ],
+                max_tokens: 400,
+                temperature: 0.7,
+              }),
+            })
+            
+            if (grokResponse.ok) {
+              const grokData = await grokResponse.json()
+              const grokInsights = grokData.choices?.[0]?.message?.content || null
+              if (grokInsights) {
+                data.grok_insights = grokInsights
+                // Optionally enhance why and action with Grok insights
+                const lines = grokInsights.split('\n').filter(l => l.trim())
+                if (lines.length > 0) {
+                  // Use Grok's explanation if it's better
+                  if (lines[0].length > 20) {
+                    data.why = lines[0]
+                  }
+                  if (lines.length > 1 && lines.slice(1).join(' ').length > 10) {
+                    data.action = lines.slice(1).join(' ').trim()
+                  }
+                }
+              }
+            }
+          } catch (grokError) {
+            console.warn('[Reliability API] Grok enhancement failed:', grokError)
+            // Continue without Grok enhancement
+          }
+        }
         
         return NextResponse.json(data)
       } catch (proxyError) {
@@ -403,13 +477,80 @@ export async function POST(request: NextRequest) {
       const reliabilityScore = Math.max(0, Math.min(100, Math.round(100 * (1 - risk))))
       const reliabilityLabel = reliabilityScore < 70 ? 'NOT RELIABLE' : 'RELIABLE'
 
-      // Generate explanation and action (templated for MVP)
+      // Generate explanation and action
+      // Try to enhance with Grok AI if available, otherwise use templated response
+      let why = ''
+      let action = ''
+      let grokInsights: string | null = null
+      
       // Only show occlusion if it's significant
       const occlusionText = occlusionPctMax > 5 
         ? `${Math.round(occlusionPctMax)}% occlusion` 
         : 'minimal occlusion'
-      const why = `Single view with ${occlusionText} means this zone can't be verified independently.`
-      const action = 'Add overlap / reposition camera / request drone check.'
+      
+      // Try to get Grok AI insights (optional enhancement)
+      // Note: In mock mode, we use metrics-only analysis
+      // When backend is running, it provides actual frames which are used for richer analysis
+      const grokApiKey = process.env.GROK_API_KEY
+      if (grokApiKey) {
+        try {
+          // Use metrics-based analysis for mock mode
+          // (Backend mode uses actual frames - see backend response handling above)
+          const grokPrompt = `You are analyzing CCTV reliability data. Based on these metrics:
+- Reliability Score: ${reliabilityScore}/100 (${reliabilityLabel})
+- Maximum Occlusion: ${Math.round(occlusionPctMax)}%
+- Average Occlusion: ${Math.round(occlusionPctAvg)}%
+- Maximum Dwell Time: ${dwellSMax.toFixed(1)}s
+- Blur Score: ${Math.round(blurScoreAvg)}
+- Early Alert Time: ${flipAtS.toFixed(1)}s
+
+Provide a concise, actionable analysis (2-3 sentences) explaining why this zone is ${reliabilityLabel.toLowerCase()} and specific recommendations for improvement. Focus on the occlusion, dwell time, and blur metrics.`
+
+          const grokApiUrl = process.env.GROK_API_URL || 'https://api.x.ai/v1'
+          const modelName = process.env.GROK_MODEL || 'grok-beta'
+          
+          const grokResponse = await fetch(`${grokApiUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${grokApiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: modelName,
+              messages: [
+                {
+                  role: 'user',
+                  content: grokPrompt,
+                },
+              ],
+              max_tokens: 400,
+              temperature: 0.7,
+            }),
+          })
+          
+          if (grokResponse.ok) {
+            const grokData = await grokResponse.json()
+            grokInsights = grokData.choices?.[0]?.message?.content || null
+            
+            if (grokInsights) {
+              // Parse Grok response to extract why and action
+              const lines = grokInsights.split('\n').filter(l => l.trim())
+              why = lines[0] || `Single view with ${occlusionText} means this zone can't be verified independently.`
+              action = lines.slice(1).join(' ').trim() || 'Add overlap / reposition camera / request drone check.'
+            }
+          }
+        } catch (grokError) {
+          console.warn('[Reliability API] Grok enhancement failed, using default:', grokError)
+        }
+      }
+      
+      // Fallback to templated response if Grok not available or failed
+      if (!why) {
+        why = `Single view with ${occlusionText} means this zone can't be verified independently.`
+      }
+      if (!action) {
+        action = 'Add overlap / reposition camera / request drone check.'
+      }
 
       // Store frame data for overlay rendering (frontend will draw)
       // In production: use opencv-python to generate base64 PNG with ROI + boxes
@@ -433,6 +574,7 @@ export async function POST(request: NextRequest) {
         reliability_score: reliabilityScore,
         why,
         action,
+        ...(grokInsights ? { grok_insights: grokInsights } : {}),
         signals: {
           occlusion_pct_avg: Math.round(occlusionPctAvg * 10) / 10,
           occlusion_pct_max: Math.round(occlusionPctMax * 10) / 10,
