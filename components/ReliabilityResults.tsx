@@ -527,7 +527,7 @@ export default function ReliabilityResults({
                     </div>
                     <div 
                       className="flex items-center justify-between p-2 bg-orange-500/10 border border-orange-500/30 rounded cursor-help"
-                      title="Standard AI Alert: Traditional systems trigger when occlusion >60% for 2s OR dwell time ≥4s. Slower than XUUG."
+                      title="Simulated Traditional AI Alert: Conservative thresholds (occlusion >60% for 2s OR dwell ≥4s) used for comparison. Demonstrates XUUG's faster detection."
                     >
                       <div className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-orange-400" />

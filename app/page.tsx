@@ -66,13 +66,35 @@ export default function Home() {
           {/* Trailer Video Embed */}
           <div className="mb-16 max-w-4xl mx-auto">
             <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-gray-800 glass-effect">
-              <iframe
-                className="w-full h-full"
-                src="https://www.youtube.com/embed/dQw4w9WgXcQ"
-                title="XUUG Trailer"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
+              {/* Video player */}
+              <video
+                className="w-full h-full object-cover"
+                controls
+                autoPlay
+                loop
+                muted
+                playsInline
+                onError={(e) => {
+                  // Fallback to placeholder if video fails to load
+                  const target = e.target as HTMLVideoElement;
+                  target.style.display = 'none';
+                  const fallback = target.nextElementSibling as HTMLElement;
+                  if (fallback) fallback.style.display = 'flex';
+                }}
+              >
+                <source src="/xuug_intro.mp4" type="video/mp4" />
+              </video>
+              {/* Fallback placeholder if video doesn't load */}
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-900 via-black to-gray-900" style={{ display: 'none' }}>
+                <div className="text-center">
+                  <div className="text-8xl md:text-9xl font-bold text-white mb-4 futuristic-glow animate-pulse">
+                    XUUG
+                  </div>
+                  <div className="text-xl md:text-2xl text-gray-400 font-light">
+                    CCTV Reliability Audit Platform
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 

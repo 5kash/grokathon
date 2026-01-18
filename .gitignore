@@ -44,4 +44,3 @@ __pycache__/
 backend/venv/
 backend/env/
 *.log
-backend/yolov8n.pt

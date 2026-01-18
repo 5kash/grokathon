@@ -52,7 +52,11 @@ def get_model():
     global model
     if model is None:
         print("[Backend] Loading YOLOv8n model...")
-        model = YOLO('yolov8n.pt')
+        # YOLO will auto-download yolov8n.pt if it doesn't exist
+        model_path = 'yolov8n.pt'
+        if not os.path.exists(model_path):
+            print("[Backend] Model file not found, YOLO will download it automatically...")
+        model = YOLO(model_path)
         print("[Backend] YOLOv8n model loaded successfully!")
     return model
 
@@ -567,6 +571,10 @@ async def analyze_reliability(
                     cumulative_dwell = 0
             
             # Calculate standard_ai_alert_at_s
+            # NOTE: These thresholds (60% occlusion for 2s, or 4s dwell) are SIMULATED values
+            # representing conservative detection thresholds typical of traditional AI security systems.
+            # They are used for comparison purposes to demonstrate XUUG's faster detection capabilities.
+            # These are NOT documented industry standards - they are design assumptions for demonstration.
             standard_ai_alert_at_s = 0
             standard_not_triggered = False
             cumulative_dwell = 0
@@ -576,7 +584,7 @@ async def analyze_reliability(
             for i, pct in enumerate(occlusion_pcts):
                 frame_time = processed_frames[i]['timestamp']
                 
-                # Check occlusion > 60% for 2s
+                # Simulated traditional system: Check occlusion > 60% for 2s
                 if pct > 60:
                     occlusion60_duration += 1 / fps
                     if occlusion60_duration >= 2 and standard_ai_alert_at_s == 0:
@@ -584,7 +592,7 @@ async def analyze_reliability(
                 else:
                     occlusion60_duration = 0
                 
-                # Check dwell >= 4s
+                # Simulated traditional system: Check dwell >= 4s
                 if pct > 10:
                     cumulative_dwell += 1 / fps
                     if cumulative_dwell >= 4 and standard_ai_alert_at_s == 0:
@@ -870,4 +878,5 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
