@@ -8,42 +8,61 @@ import sys
 # This must happen before any cv2 import
 def setup_opencv_libs():
     """Set up library paths for OpenCV before importing."""
-    import subprocess
-    # Find and add libGL, libstdc++, etc. to LD_LIBRARY_PATH
+    import glob
+    
     lib_paths = []
     
-    # Find libGL
-    try:
-        result = subprocess.run(['find', '/nix/store', '-name', 'libGL.so.1'], 
-                              capture_output=True, text=True, timeout=2)
-        if result.returncode == 0 and result.stdout.strip():
-            lib_path = os.path.dirname(result.stdout.strip().split('\n')[0])
-            lib_paths.append(lib_path)
-    except:
-        pass
-    
-    # Find libstdc++
-    try:
-        result = subprocess.run(['find', '/nix/store', '-name', 'libstdc++.so.6'], 
-                              capture_output=True, text=True, timeout=2)
-        if result.returncode == 0 and result.stdout.strip():
-            lib_path = os.path.dirname(result.stdout.strip().split('\n')[0])
-            lib_paths.append(lib_path)
-    except:
-        pass
-    
-    # Add /usr/lib if libraries are there
-    if os.path.exists('/usr/lib/libGL.so.1') or os.path.exists('/usr/lib/libstdc++.so.6'):
+    # Add /usr/lib first (where we copy libraries during build)
+    if os.path.exists('/usr/lib'):
         lib_paths.append('/usr/lib')
+    
+    # Find libGL in Nix store
+    try:
+        import subprocess
+        result = subprocess.run(['find', '/nix/store', '-name', 'libGL.so.1', '-type', 'f'], 
+                              capture_output=True, text=True, timeout=1)
+        if result.returncode == 0 and result.stdout.strip():
+            lib_path = os.path.dirname(result.stdout.strip().split('\n')[0])
+            if lib_path not in lib_paths:
+                lib_paths.append(lib_path)
+    except:
+        pass
+    
+    # Find libstdc++ in Nix store
+    try:
+        result = subprocess.run(['find', '/nix/store', '-name', 'libstdc++.so.6', '-type', 'f'], 
+                              capture_output=True, text=True, timeout=1)
+        if result.returncode == 0 and result.stdout.strip():
+            lib_path = os.path.dirname(result.stdout.strip().split('\n')[0])
+            if lib_path not in lib_paths:
+                lib_paths.append(lib_path)
+    except:
+        pass
+    
+    # Find gcc lib directories
+    try:
+        result = subprocess.run(['find', '/nix/store', '-type', 'd', '-path', '*/gcc*/lib'], 
+                              capture_output=True, text=True, timeout=1)
+        if result.returncode == 0:
+            for gcc_lib_dir in result.stdout.strip().split('\n')[:5]:
+                if gcc_lib_dir and gcc_lib_dir not in lib_paths:
+                    lib_paths.append(gcc_lib_dir)
+    except:
+        pass
     
     # Update LD_LIBRARY_PATH
     current_ld = os.environ.get('LD_LIBRARY_PATH', '')
-    new_ld = ':'.join(lib_paths + [current_ld]) if current_ld else ':'.join(lib_paths)
+    new_ld = ':'.join(lib_paths + ([current_ld] if current_ld else []))
     os.environ['LD_LIBRARY_PATH'] = new_ld
     
     # Disable OpenGL/GUI features in OpenCV
     os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
     os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    
+    # Debug output
+    print(f"[Backend] setup_opencv_libs: LD_LIBRARY_PATH={new_ld}", file=sys.stderr)
+    print(f"[Backend] /usr/lib/libGL.so.1 exists: {os.path.exists('/usr/lib/libGL.so.1')}", file=sys.stderr)
+    print(f"[Backend] /usr/lib/libstdc++.so.6 exists: {os.path.exists('/usr/lib/libstdc++.so.6')}", file=sys.stderr)
 
 # Set up libraries BEFORE importing cv2
 setup_opencv_libs()
@@ -51,9 +70,17 @@ setup_opencv_libs()
 # Now import cv2 (libraries should be set up)
 try:
     import cv2
+    print("[Backend] cv2 imported successfully", file=sys.stderr)
 except ImportError as e:
     print(f"[Backend] ERROR: Failed to import cv2: {e}", file=sys.stderr)
     print(f"[Backend] LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'NOT SET')}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    raise
+except Exception as e:
+    print(f"[Backend] ERROR: Unexpected error importing cv2: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
     raise
 
 import numpy as np
