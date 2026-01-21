@@ -5,7 +5,8 @@ PYTHONUNBUFFERED = "1"
 
 [phases.setup]
 # Runtime dependencies for OpenCV and NumPy
-nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg", "gcc", "zlib"]
+# Use gcc12 instead of gcc13 to avoid GLIBC version mismatch (gcc13 needs GLIBC 2.38, but we have 2.37)
+nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg", "gcc12", "zlib"]
 # Add library paths so OpenCV can find libraries at runtime
 nixLibs = ["libGL", "glib", "libGLU", "zlib"]
 
