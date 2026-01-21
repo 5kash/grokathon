@@ -96,17 +96,35 @@ echo "Python: ${PYTHON}" >&2
 echo "Port: ${PORT:-8000}" >&2
 echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}" >&2
 
-# Test Python import before starting
-echo "Testing Python imports..." >&2
-${PYTHON} -c "import sys; print(f'Python: {sys.version}')" 2>&1 || echo "Python test failed" >&2
+# Export LD_LIBRARY_PATH so Python subprocesses can see it
+export LD_LIBRARY_PATH
 
-# Try importing cv2 to see the actual error
-echo "Testing cv2 import..." >&2
-${PYTHON} -c "import cv2; print('cv2 imported successfully')" 2>&1 || {
-    echo "ERROR: cv2 import failed!" >&2
-    echo "This is the error that's preventing startup" >&2
+# Test Python import before starting
+echo "Testing Python..." >&2
+${PYTHON} -c "import sys; print(f'Python: {sys.version}')" 2>&1 || {
+    echo "ERROR: Python test failed!" >&2
     exit 1
 }
 
-echo "All imports successful, starting uvicorn..." >&2
+# Try importing cv2 to see the actual error
+echo "Testing cv2 import with LD_LIBRARY_PATH=${LD_LIBRARY_PATH}..." >&2
+${PYTHON} -c "
+import os
+import sys
+os.environ['LD_LIBRARY_PATH'] = '${LD_LIBRARY_PATH}'
+try:
+    import cv2
+    print('SUCCESS: cv2 imported successfully')
+except Exception as e:
+    print(f'ERROR: cv2 import failed: {e}', file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+" 2>&1 || {
+    echo "ERROR: cv2 import test failed!" >&2
+    echo "This is preventing startup. Check library paths above." >&2
+    exit 1
+}
+
+echo "All tests passed, starting uvicorn..." >&2
 exec ${PYTHON} -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info

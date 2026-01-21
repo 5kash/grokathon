@@ -2,12 +2,60 @@ from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import os
-# Disable OpenGL/GUI features in OpenCV before import
-os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
-os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
-# Try to prevent libGL loading
-os.environ['QT_QPA_PLATFORM'] = 'offscreen'
-import cv2
+import sys
+
+# Set up library paths BEFORE importing cv2
+# This must happen before any cv2 import
+def setup_opencv_libs():
+    """Set up library paths for OpenCV before importing."""
+    import subprocess
+    # Find and add libGL, libstdc++, etc. to LD_LIBRARY_PATH
+    lib_paths = []
+    
+    # Find libGL
+    try:
+        result = subprocess.run(['find', '/nix/store', '-name', 'libGL.so.1'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0 and result.stdout.strip():
+            lib_path = os.path.dirname(result.stdout.strip().split('\n')[0])
+            lib_paths.append(lib_path)
+    except:
+        pass
+    
+    # Find libstdc++
+    try:
+        result = subprocess.run(['find', '/nix/store', '-name', 'libstdc++.so.6'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0 and result.stdout.strip():
+            lib_path = os.path.dirname(result.stdout.strip().split('\n')[0])
+            lib_paths.append(lib_path)
+    except:
+        pass
+    
+    # Add /usr/lib if libraries are there
+    if os.path.exists('/usr/lib/libGL.so.1') or os.path.exists('/usr/lib/libstdc++.so.6'):
+        lib_paths.append('/usr/lib')
+    
+    # Update LD_LIBRARY_PATH
+    current_ld = os.environ.get('LD_LIBRARY_PATH', '')
+    new_ld = ':'.join(lib_paths + [current_ld]) if current_ld else ':'.join(lib_paths)
+    os.environ['LD_LIBRARY_PATH'] = new_ld
+    
+    # Disable OpenGL/GUI features in OpenCV
+    os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
+    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
+# Set up libraries BEFORE importing cv2
+setup_opencv_libs()
+
+# Now import cv2 (libraries should be set up)
+try:
+    import cv2
+except ImportError as e:
+    print(f"[Backend] ERROR: Failed to import cv2: {e}", file=sys.stderr)
+    print(f"[Backend] LD_LIBRARY_PATH: {os.environ.get('LD_LIBRARY_PATH', 'NOT SET')}", file=sys.stderr)
+    raise
+
 import numpy as np
 import base64
 import tempfile
