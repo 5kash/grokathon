@@ -1,0 +1,8 @@
+[providers]
+python = "3.9"
+
+[phases.setup]
+nixPkgs = ["python39", "ffmpeg", "libGL", "libGLU"]
+
+[phases.install]
+cmds = ["pip install --upgrade pip", "pip install -r requirements.txt"]

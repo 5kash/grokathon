@@ -26,7 +26,12 @@ except ImportError:
     pass
 
 # Now import YOLO (after patching torch.load)
-from ultralytics import YOLO
+# Import YOLO lazily to avoid startup issues
+try:
+    from ultralytics import YOLO
+except ImportError as e:
+    print(f"[Backend] Warning: YOLO import failed: {e}. Some features may not work.")
+    YOLO = None
 
 # Import extracted modules
 from modules.motion_detector import MotionDetector
@@ -50,6 +55,8 @@ model = None
 def get_model():
     """Lazy load YOLO model on first use."""
     global model
+    if YOLO is None:
+        raise ImportError("YOLO (ultralytics) is not available. Please install ultralytics package.")
     if model is None:
         print("[Backend] Loading YOLOv8n model...")
         # YOLO will auto-download yolov8n.pt if it doesn't exist
