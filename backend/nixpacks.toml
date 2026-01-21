@@ -24,20 +24,19 @@ cmds = [
 
 [phases.build]
 cmds = [
-  # Make start script executable
+  # Make scripts executable
   "chmod +x start.sh",
+  "chmod +x create_libgl_stub.sh || true",
   # Create /usr/lib if it doesn't exist
   "mkdir -p /usr/lib",
-  # Copy libGL and dependencies to /usr/lib (more reliable than symlinks)
-  "echo 'Copying libGL and dependencies...'",
+  # Try to get libGL from Nix store first
   "GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GL_LIB\" ]; then cp \"$GL_LIB\" /usr/lib/libGL.so.1 && echo \"Copied libGL.so.1\"; fi",
+  "if [ -n \"$GL_LIB\" ]; then cp \"$GL_LIB\" /usr/lib/libGL.so.1 && echo \"Copied libGL.so.1 from Nix store\"; else echo \"libGL.so.1 not found in Nix store, will try stub\"; bash create_libgl_stub.sh || true; fi",
+  # Copy other dependencies
   "GLIB_LIB=$(find /nix/store -name 'libglib-2.0.so.0' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLIB_LIB\" ]; then cp \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0 && echo \"Copied libglib-2.0.so.0\"; fi",
+  "if [ -n \"$GLIB_LIB\" ]; then cp \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0; fi",
   "GLU_LIB=$(find /nix/store -name 'libGLU.so.1' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLU_LIB\" ]; then cp \"$GLU_LIB\" /usr/lib/libGLU.so.1 && echo \"Copied libGLU.so.1\"; fi",
-  # Also copy any .so files from the same directories
-  "for lib in libGL.so libglib libGLU.so; do lib_dir=$(find /nix/store -name \"${lib}*\" 2>/dev/null | head -1 | xargs dirname 2>/dev/null); if [ -n \"$lib_dir\" ]; then cp $lib_dir/*.so* /usr/lib/ 2>/dev/null || true; fi; done",
-  "echo 'Libraries in /usr/lib:'",
-  "ls -la /usr/lib/libGL* /usr/lib/libglib* 2>/dev/null | head -10 || echo 'No libraries found'"
+  "if [ -n \"$GLU_LIB\" ]; then cp \"$GLU_LIB\" /usr/lib/libGLU.so.1; fi",
+  # Verify
+  "ls -la /usr/lib/libGL.so.1 2>/dev/null && echo 'libGL.so.1 is present' || echo 'WARNING: libGL.so.1 missing!'"
 ]
