@@ -1,8 +1,9 @@
 # CPU-only PyTorch (much smaller than GPU version)
-# Note: For local dev, we can use regular torch (smaller download)
-# For Railway, we use CPU-only version
-torch==2.0.1
-torchvision==0.15.2
+# IMPORTANT: Railway needs CPU-only version to stay under 4GB limit
+# For local dev, you can use regular torch, but Railway MUST use CPU-only
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.0.1+cpu
+torchvision==0.15.2+cpu
 
 # Core dependencies
 fastapi==0.104.1
