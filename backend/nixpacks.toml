@@ -26,12 +26,19 @@ cmds = [
 cmds = [
   # Make start script executable
   "chmod +x start.sh",
-  # Create symlinks for libGL so OpenCV can find it at runtime
-  "mkdir -p /usr/lib || true",
+  # Create /usr/lib if it doesn't exist
+  "mkdir -p /usr/lib",
+  # Find and symlink libGL
+  "echo 'Finding libGL...'",
   "GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GL_LIB\" ]; then ln -sf \"$GL_LIB\" /usr/lib/libGL.so.1 || true; fi",
+  "if [ -n \"$GL_LIB\" ]; then echo \"Found libGL at: $GL_LIB\"; ln -sf \"$GL_LIB\" /usr/lib/libGL.so.1 && echo \"Created symlink: /usr/lib/libGL.so.1 -> $GL_LIB\"; else echo \"WARNING: libGL.so.1 not found!\"; fi",
+  # Find and symlink libglib
   "GLIB_LIB=$(find /nix/store -name 'libglib-2.0.so.0' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLIB_LIB\" ]; then ln -sf \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0 || true; fi",
+  "if [ -n \"$GLIB_LIB\" ]; then ln -sf \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0; fi",
+  # Find and symlink libGLU
   "GLU_LIB=$(find /nix/store -name 'libGLU.so.1' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLU_LIB\" ]; then ln -sf \"$GLU_LIB\" /usr/lib/libGLU.so.1 || true; fi"
+  "if [ -n \"$GLU_LIB\" ]; then ln -sf \"$GLU_LIB\" /usr/lib/libGLU.so.1; fi",
+  # Verify symlinks
+  "echo 'Symlinks created:'",
+  "ls -la /usr/lib/libGL* /usr/lib/libglib* 2>/dev/null || echo 'No symlinks found'"
 ]
