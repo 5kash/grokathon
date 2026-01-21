@@ -54,6 +54,7 @@ fi
 # Start uvicorn using python -m to avoid interpreter issues
 # Run in a subshell with venv activated to ensure all paths work
 (
+    cd "$(pwd)"
     source venv/bin/activate
     $PYTHON_BIN -m uvicorn main:app --host 0.0.0.0 --port 8000
 ) > /tmp/backend.log 2>&1 &
@@ -62,12 +63,25 @@ cd ..
 
 # Wait a moment for backend to start
 echo "⏳ Waiting for backend to start..."
-sleep 3
+sleep 5
 
-# Check if backend is running
+# Check if backend is running and responding
 if ! kill -0 $BACKEND_PID 2>/dev/null; then
-    echo "❌ Backend failed to start"
+    echo "❌ Backend process died. Check /tmp/backend.log for errors:"
+    tail -20 /tmp/backend.log 2>/dev/null || echo "No log file found"
     exit 1
+fi
+
+# Verify backend is actually responding
+if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+    echo "⚠️  Backend process running but not responding. Check /tmp/backend.log:"
+    tail -20 /tmp/backend.log 2>/dev/null || echo "No log file found"
+    echo "Waiting a bit more..."
+    sleep 3
+    if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+        echo "❌ Backend failed to start properly"
+        exit 1
+    fi
 fi
 
 echo "✅ Backend started (PID: $BACKEND_PID)"
