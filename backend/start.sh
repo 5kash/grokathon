@@ -54,21 +54,28 @@ if [ -n "$ZLIB_LIB" ]; then
 fi
 
 # Also add gcc lib directories (gcc provides libstdc++)
-# Find all gcc-related lib directories
-GCC_LIB_DIRS=$(find /nix/store -type d \( -path "*/gcc-*/lib" -o -path "*/gcc*/lib" -o -name "lib" -path "*/gcc*" \) 2>/dev/null | head -10)
+# IMPORTANT: Only use gcc12 (or older) to avoid GLIBC 2.38 requirement
+# Exclude gcc13 which requires GLIBC 2.38
+GCC_LIB_DIRS=$(find /nix/store -type d \( -path "*/gcc-12*/lib" -o -path "*/gcc-11*/lib" -o -path "*/gcc-10*/lib" -o -path "*/gcc-9*/lib" \) 2>/dev/null | head -10)
 for gcc_dir in $GCC_LIB_DIRS; do
     if [ -d "$gcc_dir" ] && [ -n "$(ls -A "$gcc_dir"/*.so* 2>/dev/null)" ]; then
-        LIB_PATHS="${gcc_dir}:${LIB_PATHS}"
-        echo "Added lib directory: ${gcc_dir}" >&2
+        # Double-check: exclude gcc13
+        if ! echo "$gcc_dir" | grep -q "gcc-13"; then
+            LIB_PATHS="${gcc_dir}:${LIB_PATHS}"
+            echo "Added lib directory: ${gcc_dir}" >&2
+        fi
     fi
 done
 
-# Also try to find libstdc++ directly and add its directory
-STDCPP_DIRS=$(find /nix/store -name 'libstdc++.so.6' -o -name 'libstdc++.so' 2>/dev/null | xargs -I {} dirname {} | sort -u | head -5)
+# Also try to find libstdc++ directly, but EXCLUDE gcc13 versions
+STDCPP_DIRS=$(find /nix/store -name 'libstdc++.so.6' 2>/dev/null | grep -v "gcc-13" | xargs -I {} dirname {} | sort -u | head -5)
 for stdcpp_dir in $STDCPP_DIRS; do
     if [ -n "$stdcpp_dir" ] && [ -d "$stdcpp_dir" ]; then
-        LIB_PATHS="${stdcpp_dir}:${LIB_PATHS}"
-        echo "Added libstdc++ directory: ${stdcpp_dir}" >&2
+        # Double-check: exclude gcc13
+        if ! echo "$stdcpp_dir" | grep -q "gcc-13"; then
+            LIB_PATHS="${stdcpp_dir}:${LIB_PATHS}"
+            echo "Added libstdc++ directory: ${stdcpp_dir}" >&2
+        fi
     fi
 done
 
