@@ -202,8 +202,8 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
                 // Try to find "action" section (recommendations)
                 
                 // Split by double newlines (paragraphs) or single newlines
-                const paragraphs = grokInsights.split(/\n\s*\n/).filter(p => p.trim().length > 10)
-                const lines = grokInsights.split(/\n/).filter(l => l.trim().length > 10)
+                const paragraphs = grokInsights.split(/\n\s*\n/).filter((p: string) => p.trim().length > 10)
+                const lines = grokInsights.split(/\n/).filter((l: string) => l.trim().length > 10)
                 
                 // Look for "why" - usually first 1-2 sentences or first paragraph
                 // For RELIABLE: explanation of why coverage is adequate
@@ -679,8 +679,8 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
             if (grokInsights) {
               console.log('[Reliability API] Grok insights received:', grokInsights.substring(0, 100) + '...')
               // Parse Grok response - extract detailed why and action (same logic as backend mode)
-              const paragraphs = grokInsights.split(/\n\s*\n/).filter(p => p.trim().length > 10)
-              const lines = grokInsights.split(/\n/).filter(l => l.trim().length > 10)
+              const paragraphs = grokInsights.split(/\n\s*\n/).filter((p: string) => p.trim().length > 10)
+              const lines = grokInsights.split(/\n/).filter((l: string) => l.trim().length > 10)
               
               // Extract "why" - first paragraph or first 2 sentences
               if (paragraphs.length > 0) {
