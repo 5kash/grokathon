@@ -2,9 +2,11 @@ providers = ["python"]
 
 [variables]
 PYTHONUNBUFFERED = "1"
+# Add Nix library paths so OpenCV can find libGL
+LD_LIBRARY_PATH = "/nix/store/*/lib:/run/opengl-driver/lib:$LD_LIBRARY_PATH"
 
 [phases.setup]
-# Only runtime dependencies - no build tools to reduce size
+# Runtime dependencies for OpenCV
 nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg"]
 
 [phases.install]
@@ -18,4 +20,14 @@ cmds = [
   "find /opt/venv -type d -name '__pycache__' -exec rm -r {} + 2>/dev/null || true",
   "find /opt/venv -type f -name '*.pyc' -delete",
   "find /opt/venv -type f -name '*.pyo' -delete"
+]
+
+[phases.build]
+cmds = [
+  # Create symlinks for libGL so OpenCV can find it at runtime
+  "mkdir -p /usr/lib || true",
+  "GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -n 1)",
+  "if [ -n \"$GL_LIB\" ]; then ln -sf \"$GL_LIB\" /usr/lib/libGL.so.1 || true; fi",
+  "GLIB_LIB=$(find /nix/store -name 'libglib-2.0.so.0' 2>/dev/null | head -n 1)",
+  "if [ -n \"$GLIB_LIB\" ]; then ln -sf \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0 || true; fi"
 ]
