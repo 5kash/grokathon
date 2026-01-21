@@ -2,12 +2,12 @@ providers = ["python"]
 
 [variables]
 PYTHONUNBUFFERED = "1"
-# Add Nix library paths so OpenCV can find libGL
-LD_LIBRARY_PATH = "/nix/store/*/lib:/run/opengl-driver/lib:$LD_LIBRARY_PATH"
 
 [phases.setup]
 # Runtime dependencies for OpenCV
 nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg"]
+# Add library paths so OpenCV can find libGL at runtime
+nixLibs = ["libGL", "glib", "libGLU"]
 
 [phases.install]
 cmds = [
@@ -29,5 +29,11 @@ cmds = [
   "GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -n 1)",
   "if [ -n \"$GL_LIB\" ]; then ln -sf \"$GL_LIB\" /usr/lib/libGL.so.1 || true; fi",
   "GLIB_LIB=$(find /nix/store -name 'libglib-2.0.so.0' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLIB_LIB\" ]; then ln -sf \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0 || true; fi"
+  "if [ -n \"$GLIB_LIB\" ]; then ln -sf \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0 || true; fi",
+  "GLU_LIB=$(find /nix/store -name 'libGLU.so.1' 2>/dev/null | head -n 1)",
+  "if [ -n \"$GLU_LIB\" ]; then ln -sf \"$GLU_LIB\" /usr/lib/libGLU.so.1 || true; fi"
 ]
+
+[start]
+# Set LD_LIBRARY_PATH at runtime to include Nix store and symlinks
+cmd = "export LD_LIBRARY_PATH=/usr/lib:/nix/store/*/lib:$LD_LIBRARY_PATH && uvicorn main:app --host 0.0.0.0 --port $PORT"
