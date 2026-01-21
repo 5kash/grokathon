@@ -41,7 +41,7 @@ if [ ! -f "venv/bin/python" ] && [ ! -f "venv/bin/python3" ]; then
     pip install -r requirements.txt
 fi
 
-# Use python from venv to run uvicorn
+# Use python from venv to run uvicorn (python -m is more reliable)
 if [ -f "venv/bin/python" ]; then
     PYTHON_BIN="venv/bin/python"
 elif [ -f "venv/bin/python3" ]; then
@@ -52,7 +52,11 @@ else
 fi
 
 # Start uvicorn using python -m to avoid interpreter issues
-$PYTHON_BIN -m uvicorn main:app --host 0.0.0.0 --port 8000 &
+# Run in a subshell with venv activated to ensure all paths work
+(
+    source venv/bin/activate
+    $PYTHON_BIN -m uvicorn main:app --host 0.0.0.0 --port 8000
+) > /tmp/backend.log 2>&1 &
 BACKEND_PID=$!
 cd ..
 
