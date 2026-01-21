@@ -45,6 +45,14 @@ if [ -n "$STDCPP_LIB" ]; then
     echo "Found libstdc++.so.6 at: ${STDCPP_DIR}" >&2
 fi
 
+# Find and add libz (zlib - required by NumPy)
+ZLIB_LIB=$(find /nix/store -name 'libz.so.1' 2>/dev/null | head -1)
+if [ -n "$ZLIB_LIB" ]; then
+    ZLIB_DIR=$(dirname "$ZLIB_LIB")
+    LIB_PATHS="${ZLIB_DIR}:${LIB_PATHS}"
+    echo "Found libz.so.1 at: ${ZLIB_DIR}" >&2
+fi
+
 # Also add gcc lib directories (gcc provides libstdc++)
 # Find all gcc-related lib directories
 GCC_LIB_DIRS=$(find /nix/store -type d \( -path "*/gcc-*/lib" -o -path "*/gcc*/lib" -o -name "lib" -path "*/gcc*" \) 2>/dev/null | head -10)
@@ -65,7 +73,7 @@ for stdcpp_dir in $STDCPP_DIRS; do
 done
 
 # Add /usr/lib if it has the libraries
-if [ -f "/usr/lib/libGL.so.1" ] || [ -f "/usr/lib/libglib-2.0.so.0" ]; then
+if [ -f "/usr/lib/libGL.so.1" ] || [ -f "/usr/lib/libglib-2.0.so.0" ] || [ -f "/usr/lib/libz.so.1" ]; then
     LIB_PATHS="/usr/lib:${LIB_PATHS}"
     echo "Added /usr/lib to library path" >&2
 fi

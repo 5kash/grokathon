@@ -4,10 +4,10 @@ providers = ["python"]
 PYTHONUNBUFFERED = "1"
 
 [phases.setup]
-# Runtime dependencies for OpenCV
-nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg", "gcc"]
+# Runtime dependencies for OpenCV and NumPy
+nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg", "gcc", "zlib"]
 # Add library paths so OpenCV can find libraries at runtime
-nixLibs = ["libGL", "glib", "libGLU"]
+nixLibs = ["libGL", "glib", "libGLU", "zlib"]
 
 [phases.install]
 cmds = [
@@ -48,7 +48,10 @@ cmds = [
   # Also try libstdc++.so (without version)
   "STDCPP_LIB2=$(find /nix/store -name 'libstdc++.so' -not -name 'libstdc++.so.*' 2>/dev/null | head -n 1)",
   "if [ -n \"$STDCPP_LIB2\" ]; then cp \"$STDCPP_LIB2\" /usr/lib/libstdc++.so && echo \"Copied libstdc++.so\"; fi",
+  # Copy libz (zlib - required by NumPy)
+  "ZLIB_LIB=$(find /nix/store -name 'libz.so.1' 2>/dev/null | head -n 1)",
+  "if [ -n \"$ZLIB_LIB\" ]; then cp \"$ZLIB_LIB\" /usr/lib/libz.so.1 && echo \"Copied libz.so.1\"; else echo \"WARNING: libz.so.1 not found!\"; fi",
   # Verify
   "echo 'Libraries in /usr/lib:'",
-  "ls -la /usr/lib/libGL* /usr/lib/libglib* /usr/lib/libstdc++* 2>/dev/null | head -10 || echo 'Some libraries missing'"
+  "ls -la /usr/lib/libGL* /usr/lib/libglib* /usr/lib/libstdc++* /usr/lib/libz* 2>/dev/null | head -10 || echo 'Some libraries missing'"
 ]
