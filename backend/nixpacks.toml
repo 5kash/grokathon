@@ -29,14 +29,20 @@ cmds = [
   "chmod +x create_libgl_stub.sh || true",
   # Create /usr/lib if it doesn't exist
   "mkdir -p /usr/lib",
-  # Try to get libGL from Nix store first
+  # Copy libGL and dependencies
   "GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GL_LIB\" ]; then cp \"$GL_LIB\" /usr/lib/libGL.so.1 && echo \"Copied libGL.so.1 from Nix store\"; else echo \"libGL.so.1 not found in Nix store, will try stub\"; bash create_libgl_stub.sh || true; fi",
-  # Copy other dependencies
+  "if [ -n \"$GL_LIB\" ]; then cp \"$GL_LIB\" /usr/lib/libGL.so.1 && echo \"Copied libGL.so.1\"; fi",
   "GLIB_LIB=$(find /nix/store -name 'libglib-2.0.so.0' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLIB_LIB\" ]; then cp \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0; fi",
+  "if [ -n \"$GLIB_LIB\" ]; then cp \"$GLIB_LIB\" /usr/lib/libglib-2.0.so.0 && echo \"Copied libglib-2.0.so.0\"; fi",
   "GLU_LIB=$(find /nix/store -name 'libGLU.so.1' 2>/dev/null | head -n 1)",
-  "if [ -n \"$GLU_LIB\" ]; then cp \"$GLU_LIB\" /usr/lib/libGLU.so.1; fi",
+  "if [ -n \"$GLU_LIB\" ]; then cp \"$GLU_LIB\" /usr/lib/libGLU.so.1 && echo \"Copied libGLU.so.1\"; fi",
+  # Copy libstdc++ (C++ standard library)
+  "STDCPP_LIB=$(find /nix/store -name 'libstdc++.so.6' 2>/dev/null | head -n 1)",
+  "if [ -n \"$STDCPP_LIB\" ]; then cp \"$STDCPP_LIB\" /usr/lib/libstdc++.so.6 && echo \"Copied libstdc++.so.6\"; else echo \"WARNING: libstdc++.so.6 not found!\"; fi",
+  # Also try libstdc++.so (without version)
+  "STDCPP_LIB2=$(find /nix/store -name 'libstdc++.so' -not -name 'libstdc++.so.*' 2>/dev/null | head -n 1)",
+  "if [ -n \"$STDCPP_LIB2\" ]; then cp \"$STDCPP_LIB2\" /usr/lib/libstdc++.so && echo \"Copied libstdc++.so\"; fi",
   # Verify
-  "ls -la /usr/lib/libGL.so.1 2>/dev/null && echo 'libGL.so.1 is present' || echo 'WARNING: libGL.so.1 missing!'"
+  "echo 'Libraries in /usr/lib:'",
+  "ls -la /usr/lib/libGL* /usr/lib/libglib* /usr/lib/libstdc++* 2>/dev/null | head -10 || echo 'Some libraries missing'"
 ]
