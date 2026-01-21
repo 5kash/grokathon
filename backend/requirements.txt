@@ -7,9 +7,11 @@ torchvision==0.15.2+cpu
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
+# Use headless OpenCV (no GUI dependencies)
 opencv-python-headless==4.8.1.78
-ultralytics==8.1.0
 numpy==1.24.3
 Pillow==10.1.0
+# Install ultralytics but tell it to use opencv-python-headless
+ultralytics==8.1.0
 # Optional: ByteTrack for tracking (can use simple overlap tracking instead)
 # byte-track==1.0.0

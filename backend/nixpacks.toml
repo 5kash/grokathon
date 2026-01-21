@@ -13,13 +13,19 @@ nixLibs = ["libGL", "glib", "libGLU"]
 cmds = [
   "python -m venv --copies /opt/venv",
   ". /opt/venv/bin/activate && pip install --no-cache-dir --upgrade pip",
+  # Install opencv-python-headless first, then ultralytics (so it uses headless version)
+  ". /opt/venv/bin/activate && pip install --no-cache-dir opencv-python-headless==4.8.1.78",
   ". /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt",
+  # Remove full opencv-python if it got installed (ultralytics might pull it in)
+  ". /opt/venv/bin/activate && pip uninstall -y opencv-python 2>/dev/null || true",
   # Clean up pip cache and unnecessary files
   "rm -rf /opt/venv/lib/python3.9/site-packages/*/tests",
   "rm -rf /opt/venv/lib/python3.9/site-packages/*/test",
   "find /opt/venv -type d -name '__pycache__' -exec rm -r {} + 2>/dev/null || true",
   "find /opt/venv -type f -name '*.pyc' -delete",
-  "find /opt/venv -type f -name '*.pyo' -delete"
+  "find /opt/venv -type f -name '*.pyo' -delete",
+  # Remove CUDA packages if they got installed (we only need CPU)
+  ". /opt/venv/bin/activate && pip list | grep -i nvidia | awk '{print $1}' | xargs -r pip uninstall -y 2>/dev/null || true"
 ]
 
 [phases.build]
