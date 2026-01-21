@@ -5,9 +5,9 @@ PYTHONUNBUFFERED = "1"
 
 [phases.setup]
 # Runtime dependencies for OpenCV
-nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg", "gcc", "gcc.cc.lib"]
-# Add library paths so OpenCV can find libGL at runtime
-nixLibs = ["libGL", "glib", "libGLU", "gcc.cc.lib"]
+nixPkgs = ["python39", "libGL", "glib", "glibc", "libGLU", "pkg-config", "ffmpeg", "gcc"]
+# Add library paths so OpenCV can find libraries at runtime
+nixLibs = ["libGL", "glib", "libGLU"]
 
 [phases.install]
 cmds = [
