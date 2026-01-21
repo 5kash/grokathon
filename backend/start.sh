@@ -28,6 +28,14 @@ if [ -n "$GLU_LIB" ]; then
     echo "Found libGLU at: ${GLU_DIR}" >&2
 fi
 
+# Find and add libstdc++ (C++ standard library needed by OpenCV)
+STDCPP_LIB=$(find /nix/store -name 'libstdc++.so.6' 2>/dev/null | head -1)
+if [ -n "$STDCPP_LIB" ]; then
+    STDCPP_DIR=$(dirname "$STDCPP_LIB")
+    LIB_PATHS="${STDCPP_DIR}:${LIB_PATHS}"
+    echo "Found libstdc++.so.6 at: ${STDCPP_DIR}" >&2
+fi
+
 # Add /usr/lib if it has the libraries
 if [ -f "/usr/lib/libGL.so.1" ] || [ -f "/usr/lib/libglib-2.0.so.0" ]; then
     LIB_PATHS="/usr/lib:${LIB_PATHS}"
