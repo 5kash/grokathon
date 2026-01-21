@@ -21,6 +21,14 @@ trap cleanup SIGINT SIGTERM
 
 # Start backend in background
 echo "🐍 Starting Python backend on port 8000..."
+
+# Kill any existing process on port 8000
+if lsof -ti:8000 > /dev/null 2>&1; then
+    echo "⚠️  Port 8000 is in use. Killing existing process..."
+    lsof -ti:8000 | xargs kill -9 2>/dev/null
+    sleep 1
+fi
+
 cd backend
 if [ ! -d "venv" ]; then
     echo "❌ Virtual environment not found. Creating it now..."
