@@ -23,13 +23,36 @@ trap cleanup SIGINT SIGTERM
 echo "🐍 Starting Python backend on port 8000..."
 cd backend
 if [ ! -d "venv" ]; then
-    echo "❌ Virtual environment not found. Please run: cd backend && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt"
+    echo "❌ Virtual environment not found. Creating it now..."
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    echo "✅ Virtual environment created and dependencies installed"
+fi
+
+# Check if venv python exists
+if [ ! -f "venv/bin/python" ] && [ ! -f "venv/bin/python3" ]; then
+    echo "❌ Virtual environment is broken. Recreating..."
+    rm -rf venv
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install --upgrade pip
+    pip install -r requirements.txt
+fi
+
+# Use python from venv to run uvicorn
+if [ -f "venv/bin/python" ]; then
+    PYTHON_BIN="venv/bin/python"
+elif [ -f "venv/bin/python3" ]; then
+    PYTHON_BIN="venv/bin/python3"
+else
+    echo "❌ Python not found in venv"
     exit 1
 fi
 
-source venv/bin/activate
-# Use full path to uvicorn to ensure it works in background
-./venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 &
+# Start uvicorn using python -m to avoid interpreter issues
+$PYTHON_BIN -m uvicorn main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 cd ..
 
