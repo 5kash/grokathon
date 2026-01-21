@@ -1,5 +1,13 @@
 #!/bin/bash
 # Startup script to set LD_LIBRARY_PATH and start uvicorn
+# Ensure all output goes to stderr so Railway can capture it
+
+set -e  # Exit on error
+exec 2>&1  # Redirect stderr to stdout so Railway captures all output
+
+echo "=== Starting backend ===" >&2
+echo "Working directory: $(pwd)" >&2
+echo "Python version: $(python --version 2>&1 || echo 'Python not found')" >&2
 
 # Build LD_LIBRARY_PATH with all Nix library directories
 LIB_PATHS=""
@@ -82,6 +90,23 @@ else
     PYTHON="python"
 fi
 
-# Start uvicorn
-echo "Starting uvicorn..." >&2
-exec ${PYTHON} -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Start uvicorn with explicit logging
+echo "=== Starting uvicorn ===" >&2
+echo "Python: ${PYTHON}" >&2
+echo "Port: ${PORT:-8000}" >&2
+echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}" >&2
+
+# Test Python import before starting
+echo "Testing Python imports..." >&2
+${PYTHON} -c "import sys; print(f'Python: {sys.version}')" 2>&1 || echo "Python test failed" >&2
+
+# Try importing cv2 to see the actual error
+echo "Testing cv2 import..." >&2
+${PYTHON} -c "import cv2; print('cv2 imported successfully')" 2>&1 || {
+    echo "ERROR: cv2 import failed!" >&2
+    echo "This is the error that's preventing startup" >&2
+    exit 1
+}
+
+echo "All imports successful, starting uvicorn..." >&2
+exec ${PYTHON} -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info
