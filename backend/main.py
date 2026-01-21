@@ -1,6 +1,12 @@
 from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import os
+# Disable OpenGL/GUI features in OpenCV before import
+os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
+os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '0'
+# Try to prevent libGL loading
+os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 import cv2
 import numpy as np
 import base64

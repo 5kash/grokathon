@@ -1,33 +1,34 @@
 #!/bin/bash
 # Startup script to set LD_LIBRARY_PATH and start uvicorn
 
-# Find all Nix library directories and add to LD_LIBRARY_PATH
-NIX_LIBS=$(find /nix/store -type d -name lib 2>/dev/null | head -20 | tr '\n' ':' | sed 's/:$//')
-
-# Set LD_LIBRARY_PATH with /usr/lib (for symlinks) and Nix store paths
-export LD_LIBRARY_PATH="/usr/lib:${NIX_LIBS}:${LD_LIBRARY_PATH}"
-
-# Debug: print LD_LIBRARY_PATH
-echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >&2
-
-# Check if libGL exists
-if [ -f "/usr/lib/libGL.so.1" ]; then
-    echo "Found libGL.so.1 at /usr/lib/libGL.so.1" >&2
-elif [ -n "$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -1)" ]; then
-    GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -1)
-    echo "Found libGL.so.1 at ${GL_LIB}" >&2
-    export LD_LIBRARY_PATH="${GL_LIB%/*}:${LD_LIBRARY_PATH}"
-else
-    echo "WARNING: libGL.so.1 not found!" >&2
+# Find libGL and add its directory to LD_LIBRARY_PATH
+GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -1)
+if [ -n "$GL_LIB" ]; then
+    GL_DIR=$(dirname "$GL_LIB")
+    export LD_LIBRARY_PATH="${GL_DIR}:${LD_LIBRARY_PATH}"
+    echo "Added libGL path: ${GL_DIR}" >&2
 fi
 
-# Use Python from venv or system
+# Also check /usr/lib for symlinks
+if [ -f "/usr/lib/libGL.so.1" ]; then
+    export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH}"
+    echo "Using /usr/lib/libGL.so.1" >&2
+fi
+
+# Find and add other OpenCV dependencies
+for lib in libglib-2.0.so.0 libGLU.so.1; do
+    LIB_PATH=$(find /nix/store -name "$lib" 2>/dev/null | head -1)
+    if [ -n "$LIB_PATH" ]; then
+        LIB_DIR=$(dirname "$LIB_PATH")
+        export LD_LIBRARY_PATH="${LIB_DIR}:${LD_LIBRARY_PATH}"
+    fi
+done
+
+# Use Python from venv
 if [ -f "/opt/venv/bin/python" ]; then
     PYTHON="/opt/venv/bin/python"
-    echo "Using venv Python: ${PYTHON}" >&2
 else
     PYTHON="python"
-    echo "Using system Python: ${PYTHON}" >&2
 fi
 
 # Start uvicorn
