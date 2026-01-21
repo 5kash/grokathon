@@ -1,28 +1,51 @@
 #!/bin/bash
 # Startup script to set LD_LIBRARY_PATH and start uvicorn
 
-# Find libGL and add its directory to LD_LIBRARY_PATH
+# Build LD_LIBRARY_PATH with all Nix library directories
+LIB_PATHS=""
+
+# Find and add libGL directory
 GL_LIB=$(find /nix/store -name 'libGL.so.1' 2>/dev/null | head -1)
 if [ -n "$GL_LIB" ]; then
     GL_DIR=$(dirname "$GL_LIB")
-    export LD_LIBRARY_PATH="${GL_DIR}:${LD_LIBRARY_PATH}"
-    echo "Added libGL path: ${GL_DIR}" >&2
+    LIB_PATHS="${GL_DIR}:${LIB_PATHS}"
+    echo "Found libGL at: ${GL_DIR}" >&2
 fi
 
-# Also check /usr/lib for symlinks
-if [ -f "/usr/lib/libGL.so.1" ]; then
-    export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH}"
-    echo "Using /usr/lib/libGL.so.1" >&2
+# Find and add libglib directory  
+GLIB_LIB=$(find /nix/store -name 'libglib-2.0.so.0' 2>/dev/null | head -1)
+if [ -n "$GLIB_LIB" ]; then
+    GLIB_DIR=$(dirname "$GLIB_LIB")
+    LIB_PATHS="${GLIB_DIR}:${LIB_PATHS}"
+    echo "Found libglib at: ${GLIB_DIR}" >&2
 fi
 
-# Find and add other OpenCV dependencies
-for lib in libglib-2.0.so.0 libGLU.so.1; do
-    LIB_PATH=$(find /nix/store -name "$lib" 2>/dev/null | head -1)
-    if [ -n "$LIB_PATH" ]; then
-        LIB_DIR=$(dirname "$LIB_PATH")
-        export LD_LIBRARY_PATH="${LIB_DIR}:${LD_LIBRARY_PATH}"
-    fi
-done
+# Find and add libGLU directory
+GLU_LIB=$(find /nix/store -name 'libGLU.so.1' 2>/dev/null | head -1)
+if [ -n "$GLU_LIB" ]; then
+    GLU_DIR=$(dirname "$GLU_LIB")
+    LIB_PATHS="${GLU_DIR}:${LIB_PATHS}"
+    echo "Found libGLU at: ${GLU_DIR}" >&2
+fi
+
+# Add /usr/lib if it has the libraries
+if [ -f "/usr/lib/libGL.so.1" ] || [ -f "/usr/lib/libglib-2.0.so.0" ]; then
+    LIB_PATHS="/usr/lib:${LIB_PATHS}"
+    echo "Added /usr/lib to library path" >&2
+fi
+
+# Set LD_LIBRARY_PATH
+export LD_LIBRARY_PATH="${LIB_PATHS}${LD_LIBRARY_PATH}"
+echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >&2
+
+# Verify libGL can be found
+if [ -n "$GL_LIB" ] && [ -f "$GL_LIB" ]; then
+    echo "libGL.so.1 exists and is accessible" >&2
+else
+    echo "WARNING: libGL.so.1 not found or not accessible!" >&2
+    # Try to find it again with full path
+    find /nix/store -name 'libGL.so.1' 2>/dev/null | head -3 >&2
+fi
 
 # Use Python from venv
 if [ -f "/opt/venv/bin/python" ]; then
@@ -32,4 +55,5 @@ else
 fi
 
 # Start uvicorn
+echo "Starting uvicorn..." >&2
 exec ${PYTHON} -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
