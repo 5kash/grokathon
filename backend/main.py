@@ -92,6 +92,7 @@ from typing import Optional, List, Tuple, Dict
 import json
 import subprocess
 import time
+import requests
 
 # Fix PyTorch 2.6 YOLO loading issue - MUST be before YOLO import
 try:
@@ -397,6 +398,125 @@ def draw_overlay(frame: np.ndarray, roi: List[float], person_boxes: List[Tuple[f
         cv2.putText(overlay, reliability_text, (15, rel_y), font, font_scale, rel_color, thickness, cv2.LINE_AA)
     
     return overlay
+
+def get_grok_insights(
+    reliability_label: str,
+    reliability_score: int,
+    signals: Dict,
+    alert_frame_base64: Optional[str] = None,
+    overlay_image_base64: Optional[str] = None
+) -> Optional[str]:
+    """
+    Get Grok AI insights for reliability analysis.
+    
+    Args:
+        reliability_label: 'RELIABLE' or 'NOT RELIABLE'
+        reliability_score: Score from 0-100
+        signals: Dict with occlusion_pct_avg, occlusion_pct_max, dwell_s_max, blur_score_avg
+        alert_frame_base64: Base64 encoded frame at alert time (optional)
+        overlay_image_base64: Base64 encoded overlay image (optional)
+    
+    Returns:
+        Grok insights string or None if failed/not configured
+    """
+    grok_api_key = os.environ.get('GROK_API_KEY')
+    if not grok_api_key:
+        return None
+    
+    try:
+        # Use alert_frame if available (most relevant), otherwise overlay_image
+        frame_to_analyze = alert_frame_base64 or overlay_image_base64
+        has_frame = bool(frame_to_analyze)
+        
+        # Build prompt based on reliability and whether we have a frame
+        if has_frame:
+            if reliability_label == 'RELIABLE':
+                grok_prompt = f"""Analyze this CCTV frame showing a Region of Interest (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg {signals['occlusion_pct_avg']}%, max {signals['occlusion_pct_max']}%, dwell max {signals['dwell_s_max']}s, blur avg {signals['blur_score_avg']}, reliability {reliability_score}/100.
+
+This zone is RELIABLE. Explain in one sentence why the coverage is adequate and trustworthy based on what you see in the frame.
+
+Then provide maintenance recommendations. Examples: "Continue monitoring with current setup" or "Consider periodic calibration checks" or "Maintain current camera positioning"."""
+            else:
+                grok_prompt = f"""Analyze this CCTV frame showing a Region of Interest (red rectangle) with detected persons (green boxes). Metrics: Occlusion avg {signals['occlusion_pct_avg']}%, max {signals['occlusion_pct_max']}%, dwell max {signals['dwell_s_max']}s, blur avg {signals['blur_score_avg']}, reliability {reliability_score}/100.
+
+This zone is NOT RELIABLE. First, explain in one sentence why this zone is unreliable.
+
+Then, analyze the frame visually: Where are the blind spots? Where are people being detected? What's the camera angle? Based on what you see, provide a SPECIFIC camera placement recommendation. Examples: "Add camera at top-left corner pointing down at 45° angle" or "Install overhead camera 3 meters above the ROI center" or "Position second camera opposite side of room at eye level". Be specific about location and angle."""
+        else:
+            if reliability_label == 'RELIABLE':
+                grok_prompt = f"""CCTV reliability audit: Occlusion avg {signals['occlusion_pct_avg']}%, max {signals['occlusion_pct_max']}%, dwell max {signals['dwell_s_max']}s, blur avg {signals['blur_score_avg']}, reliability {reliability_score}/100.
+
+This zone is RELIABLE. Explain in one sentence why the coverage is adequate and trustworthy.
+
+Then provide maintenance recommendations. Examples: "Continue monitoring with current setup" or "Consider periodic calibration checks" or "Maintain current camera positioning"."""
+            else:
+                grok_prompt = f"""CCTV reliability audit: Occlusion avg {signals['occlusion_pct_avg']}%, max {signals['occlusion_pct_max']}%, dwell max {signals['dwell_s_max']}s, blur avg {signals['blur_score_avg']}, reliability {reliability_score}/100.
+
+This zone is NOT RELIABLE. Explain in one sentence why this zone is unreliable.
+
+Then provide a SPECIFIC camera placement recommendation based on the occlusion patterns. Examples: "Add camera opposite the Region of Interest at 3m height" or "Install overhead camera above the Region of Interest" or "Position second camera at left edge pointing right". Be specific about location and angle."""
+        
+        grok_api_url = os.environ.get('GROK_API_URL', 'https://api.x.ai/v1')
+        model_name = os.environ.get('GROK_MODEL', 'grok-4')
+        
+        # Build request body
+        if has_frame:
+            content = [
+                {
+                    "type": "text",
+                    "text": grok_prompt,
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{frame_to_analyze}",
+                    },
+                },
+            ]
+        else:
+            content = grok_prompt
+        
+        grok_request_body = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": content,
+                },
+            ],
+            "max_tokens": 800,
+            "temperature": 0.7,
+        }
+        
+        # Call Grok API
+        print(f"[Backend] Calling Grok API: {grok_api_url} with model: {model_name}, has_frame: {has_frame}", file=sys.stderr)
+        grok_response = requests.post(
+            f"{grok_api_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {grok_api_key}",
+                "Content-Type": "application/json",
+            },
+            json=grok_request_body,
+            timeout=30,  # 30 second timeout
+        )
+        
+        if grok_response.ok:
+            grok_data = grok_response.json()
+            grok_insights = grok_data.get("choices", [{}])[0].get("message", {}).get("content")
+            if grok_insights:
+                print(f"[Backend] Grok insights received: {grok_insights[:100]}...", file=sys.stderr)
+                return grok_insights
+            else:
+                print("[Backend] Grok API returned empty response", file=sys.stderr)
+        else:
+            print(f"[Backend] Grok API error: {grok_response.status_code} - {grok_response.text}", file=sys.stderr)
+    
+    except Exception as e:
+        print(f"[Backend] Error calling Grok API: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+    
+    return None
 
 def frame_to_base64(frame: np.ndarray) -> str:
     """Convert OpenCV frame to base64 PNG string."""
@@ -842,6 +962,25 @@ async def analyze_reliability(
                 }
                 for f in processed_frames
             ]
+            
+            # Enhance with Grok AI insights if available
+            grok_insights = get_grok_insights(
+                reliability_label=reliability_label,
+                reliability_score=reliability_score,
+                signals={
+                    "occlusion_pct_avg": round(occlusion_pct_avg * 10) / 10,
+                    "occlusion_pct_max": round(occlusion_pct_max * 10) / 10,
+                    "dwell_s_max": round(dwell_s_max * 10) / 10,
+                    "blur_score_avg": round(blur_score_avg),
+                },
+                alert_frame_base64=alert_frame_base64,
+                overlay_image_base64=overlay_image_base64,
+            )
+            
+            if grok_insights:
+                response["grok_insights"] = grok_insights
+                # Optionally enhance why/action from Grok (but keep original as fallback)
+                # For now, just add grok_insights field - frontend can use it
             
             return JSONResponse(response)
             
