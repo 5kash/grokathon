@@ -14,7 +14,9 @@ nixLibs = ["libGL", "glib", "libGLU", "zlib"]
 cmds = [
   "python -m venv --copies /opt/venv",
   ". /opt/venv/bin/activate && pip install --no-cache-dir --upgrade pip",
-  # Install opencv-python-headless first, then ultralytics (so it uses headless version)
+  # CRITICAL: Install numpy 1.25.2 FIRST to prevent opencv from pulling numpy 2.0.2
+  ". /opt/venv/bin/activate && pip install --no-cache-dir numpy==1.25.2",
+  # Install opencv-python-headless (will use already-installed numpy 1.25.2)
   ". /opt/venv/bin/activate && pip install --no-cache-dir opencv-python-headless==4.8.1.78",
   ". /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt",
   # Remove full opencv-python if it got installed (ultralytics might pull it in)
