@@ -140,13 +140,19 @@ def get_model():
     if YOLO is None:
         raise ImportError("YOLO (ultralytics) is not available. Please install ultralytics package.")
     if model is None:
-        print("[Backend] Loading YOLOv8n model...")
-        # YOLO will auto-download yolov8n.pt if it doesn't exist
-        model_path = 'yolov8n.pt'
-        if not os.path.exists(model_path):
-            print("[Backend] Model file not found, YOLO will download it automatically...")
-        model = YOLO(model_path)
-        print("[Backend] YOLOv8n model loaded successfully!")
+        print("[Backend] Loading YOLOv8n model...", file=sys.stderr)
+        try:
+            # YOLO will auto-download yolov8n.pt if it doesn't exist
+            model_path = 'yolov8n.pt'
+            if not os.path.exists(model_path):
+                print("[Backend] Model file not found, YOLO will download it automatically...", file=sys.stderr)
+            model = YOLO(model_path)
+            print("[Backend] YOLOv8n model loaded successfully!", file=sys.stderr)
+        except Exception as e:
+            print(f"[Backend] ERROR loading YOLO model: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            raise
     return model
 
 # Default Region of Interest (full screen) - [x1, y1, x2, y2] as percentage
@@ -992,7 +998,9 @@ async def analyze_reliability(
     except Exception as e:
         import traceback
         error_msg = f"Analysis error: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
+        # Print to stderr so Railway captures it in logs
+        print(error_msg, file=sys.stderr)
+        print(f"[Backend] Returning 500 error to client", file=sys.stderr)
         return JSONResponse(
             {"error": f"Failed to analyze video: {str(e)}"},
             status_code=500
