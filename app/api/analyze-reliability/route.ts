@@ -88,11 +88,20 @@ export async function POST(request: NextRequest) {
           backendFormData.append('roi', roiParam as string)
         }
         
-        // Forward to FastAPI backend
-        const backendResponse = await fetch(`${backendUrl}/analyze-reliability`, {
-          method: 'POST',
-          body: backendFormData,
-        })
+        // Forward to FastAPI backend with extended timeout
+        // Backend video processing can take 30-60 seconds
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 120000) // 2 minute timeout
+        
+        try {
+          const backendResponse = await fetch(`${backendUrl}/analyze-reliability`, {
+            method: 'POST',
+            body: backendFormData,
+            signal: controller.signal,
+            // Don't set timeout header - let it use the signal timeout
+          })
+          
+          clearTimeout(timeoutId)
         
         if (!backendResponse.ok) {
           const errorData = await backendResponse.text()
@@ -103,10 +112,10 @@ export async function POST(request: NextRequest) {
           )
         }
         
-        const data = await backendResponse.json()
-        const elapsed = Date.now() - startTime
-        console.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
-        console.log('[Reliability API] Backend response keys:', Object.keys(data))
+          const data = await backendResponse.json()
+          const elapsed = Date.now() - startTime
+          console.log(`[Reliability API] Backend processing completed in ${elapsed}ms`)
+          console.log('[Reliability API] Backend response keys:', Object.keys(data))
         console.log('[Reliability API] Has overlay_image:', !!data.overlay_image)
         console.log('[Reliability API] Has alert_frame:', !!data.alert_frame)
         
@@ -303,8 +312,20 @@ Then provide a SPECIFIC camera placement recommendation based on the occlusion p
           data.debug.roi_source = 'AUTO' // Default to AUTO if not specified
         }
         
-        return NextResponse.json(data)
+          return NextResponse.json(data)
+        } catch (fetchError) {
+          clearTimeout(timeoutId)
+          if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+            console.error('[Reliability API] Backend request timed out after 2 minutes')
+            return NextResponse.json(
+              { error: 'Backend processing timed out. The video analysis is taking too long. Please try a shorter video or lower FPS.' },
+              { status: 504 }
+            )
+          }
+          throw fetchError // Re-throw to be caught by outer catch
+        }
       } catch (proxyError) {
+        console.error('[Reliability API] Backend connection failed:', proxyError)
         console.warn('[Reliability API] Backend connection failed, falling back to mock processing:', proxyError)
         // Fall through to mock processing instead of erroring
       }
