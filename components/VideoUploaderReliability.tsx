@@ -162,8 +162,8 @@ export default function VideoUploaderReliability({
       
       console.log(`[Frontend] Calling ${endpoint} with file: ${selectedFile.name} (${selectedFile.size} bytes) at`, new Date().toISOString())
       
-      // Add timeout (65 seconds for Vercel)
-      const timeout = 65000
+      // Add timeout (4.5 minutes to allow for Vercel 5min maxDuration)
+      const timeout = 270000 // 4.5 minutes
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), timeout)
       

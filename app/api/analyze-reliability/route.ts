@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60 // 60 seconds (Vercel Pro limit)
+export const maxDuration = 300 // 300 seconds (5 minutes) - Vercel Pro allows up to 300s for video processing
 
 // Types
 interface ReliabilityResponse {
