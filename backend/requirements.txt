@@ -11,7 +11,9 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 # Use headless OpenCV (no GUI dependencies)
 opencv-python-headless==4.8.1.78
-numpy==1.24.3
+# numpy 1.26.x is compatible with pandas 2.3.3 (required by ultralytics)
+# numpy 1.24.3 causes "Cannot convert numpy.ndarray to numpy.ndarray" error with pandas 2.3.3
+numpy==1.26.4
 Pillow==10.1.0
 # Install ultralytics but tell it to use opencv-python-headless
 ultralytics==8.1.0
