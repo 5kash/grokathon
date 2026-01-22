@@ -16,6 +16,8 @@ cmds = [
   ". /opt/venv/bin/activate && pip install --no-cache-dir --upgrade pip",
   # CRITICAL: Install numpy 1.25.2 FIRST to prevent opencv from pulling numpy 2.0.2
   ". /opt/venv/bin/activate && pip install --no-cache-dir numpy==1.25.2",
+  # CRITICAL: Install pandas 2.2.3 BEFORE ultralytics to prevent it from pulling pandas 2.3.3
+  ". /opt/venv/bin/activate && pip install --no-cache-dir pandas==2.2.3",
   # Install opencv-python-headless (will use already-installed numpy 1.25.2)
   ". /opt/venv/bin/activate && pip install --no-cache-dir opencv-python-headless==4.8.1.78",
   ". /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt",
