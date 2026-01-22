@@ -155,15 +155,23 @@ export default function VideoUploaderReliability({
 
       const requestStart = Date.now()
       
-      // Always use Next.js API route (mock processing) - works without backend
-      // Backend is optional and only used if explicitly configured AND available
-      const endpoint = '/api/analyze-reliability'
-      console.log(`[Frontend] Using Next.js API route: ${endpoint}`)
+      // Try to use backend directly if available (faster, no Vercel function timeout)
+      // Fallback to API route if backend URL not available
+      const backendUrl = process.env.NEXT_PUBLIC_ANALYSIS_BACKEND_URL
+      const endpoint = backendUrl 
+        ? `${backendUrl}/analyze-reliability`  // Direct to Railway backend (fast!)
+        : '/api/analyze-reliability'  // Via Vercel API route (slower, but works without backend)
+      
+      if (backendUrl) {
+        console.log(`[Frontend] Using direct backend: ${endpoint}`)
+      } else {
+        console.log(`[Frontend] Using Next.js API route: ${endpoint}`)
+      }
       
       console.log(`[Frontend] Calling ${endpoint} with file: ${selectedFile.name} (${selectedFile.size} bytes) at`, new Date().toISOString())
       
-      // Add timeout (4.5 minutes to allow for Vercel 5min maxDuration)
-      const timeout = 270000 // 4.5 minutes
+      // Add timeout (5 minutes for direct backend, 4.5 minutes for API route)
+      const timeout = backendUrl ? 300000 : 270000 // 5min for direct, 4.5min for API route
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), timeout)
       
